@@ -39,8 +39,10 @@ type ComponentTestCtx struct {
 func NewComponentTestCtx(object common.PlatformObject) (*ComponentTestCtx, error) {
 	tcf, err := testf.NewTestContext(
 		testf.WithTOptions(
-			testf.WithEventuallyTimeout(generalWaitTimeout),
-			testf.WithEventuallyPollingInterval(generalPollInterval),
+			testf.WithEventuallyTimeout(defaultEventuallyTimeout),
+			testf.WithEventuallyPollingInterval(defaultEventuallyPollInterval),
+			testf.WithConsistentlyDuration(defaultConsistentlyDuration),
+			testf.WithConsistentlyPollingInterval(defaultConsistentlyPollInterval),
 		),
 	)
 

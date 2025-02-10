@@ -31,8 +31,8 @@ func trustyAITestSuite(t *testing.T) {
 	t.Run("Validate component enabled", componentCtx.ValidateComponentEnabled)
 	t.Run("Validate operands have OwnerReferences", componentCtx.ValidateOperandsOwnerReferences)
 	t.Run("Validate update operand resources", componentCtx.ValidateUpdateDeploymentsResources)
-	t.Run("Validate component disabled", componentCtx.ValidateComponentDisabled)
 	t.Run("Validate component releases", componentCtx.ValidateComponentReleases)
+	t.Run("Validate component disabled", componentCtx.ValidateComponentDisabled)
 
 	t.Run("Disable Kserve", componentCtx.disableKserve)
 }

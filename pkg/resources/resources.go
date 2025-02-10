@@ -38,6 +38,14 @@ func ToUnstructured(obj any) (*unstructured.Unstructured, error) {
 	return &u, nil
 }
 
+func FromUnstructured(obj *unstructured.Unstructured, intoObj any) error {
+	err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, intoObj)
+	if err != nil {
+		return fmt.Errorf("unable to convert unstructured object to %T: %w", intoObj, err)
+	}
+	return nil
+}
+
 func Decode(decoder runtime.Decoder, content []byte) ([]unstructured.Unstructured, error) {
 	results := make([]unstructured.Unstructured, 0)
 
@@ -338,6 +346,20 @@ func NamespacedNameFromObject(obj client.Object) types.NamespacedName {
 		Namespace: obj.GetNamespace(),
 		Name:      obj.GetName(),
 	}
+}
+
+func FormatNamespacedName(nn types.NamespacedName) string {
+	if nn.Namespace == "" {
+		return nn.Name
+	}
+	return nn.String()
+}
+
+func FormatUnstructuredName(obj *unstructured.Unstructured) string {
+	if obj.GetNamespace() == "" {
+		return obj.GetName()
+	}
+	return obj.GetNamespace() + string(types.Separator) + obj.GetName()
 }
 
 // RemoveOwnerReferences removes all owner references from a Kubernetes object that match the provided predicate.

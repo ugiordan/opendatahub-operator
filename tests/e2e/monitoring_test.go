@@ -12,21 +12,23 @@ import (
 )
 
 type MonitoringTestCtx struct {
-	*testContext
+	*TestContext
 	testMonitoringInstance serviceApi.Monitoring
 }
 
 func monitoringTestSuite(t *testing.T) {
 	t.Helper()
 
-	tc, err := NewTestContext()
+	// Initialize the test context.
+	tc, err := NewTestContext(t)
 	require.NoError(t, err)
 
+	// Create an instance of test context.
 	monitoringServiceCtx := MonitoringTestCtx{
-		testContext: tc,
+		TestContext: tc,
 	}
 
-	t.Run(tc.testDsc.Name, func(t *testing.T) {
+	t.Run(tc.TestDsc.Name, func(t *testing.T) {
 		t.Run("Auto creation of Monitoring CR", func(t *testing.T) {
 			err = monitoringServiceCtx.validateMonitoringCRCreation()
 			require.NoError(t, err, "error getting Auth CR")
@@ -40,11 +42,11 @@ func monitoringTestSuite(t *testing.T) {
 }
 
 func (tc *MonitoringTestCtx) validateMonitoringCRCreation() error {
-	if tc.testDSCI.Spec.Monitoring.ManagementState == operatorv1.Removed {
+	if tc.TestDSCI.Spec.Monitoring.ManagementState == operatorv1.Removed {
 		return nil
 	}
 	monitoringList := &serviceApi.MonitoringList{}
-	if err := tc.testContext.customClient.List(tc.ctx, monitoringList); err != nil {
+	if err := tc.TestContext.Client().List(tc.Context(), monitoringList); err != nil {
 		return fmt.Errorf("unable to find Monitoring CR instance: %w", err)
 	}
 
@@ -60,9 +62,9 @@ func (tc *MonitoringTestCtx) validateMonitoringCRCreation() error {
 }
 
 func (tc *MonitoringTestCtx) validateMonitoringCRDefaultContent() error {
-	if tc.platform == cluster.ManagedRhoai {
-		if tc.testMonitoringInstance.Spec.MonitoringCommonSpec.Namespace != tc.testDSCI.Spec.Monitoring.Namespace {
-			return fmt.Errorf("unexpected monitoring namespace reference. Expected %v, got %v", tc.testDSCI.Spec.Monitoring.Namespace,
+	if tc.Platform == cluster.ManagedRhoai {
+		if tc.testMonitoringInstance.Spec.MonitoringCommonSpec.Namespace != tc.TestDSCI.Spec.Monitoring.Namespace {
+			return fmt.Errorf("unexpected monitoring namespace reference. Expected %v, got %v", tc.TestDSCI.Spec.Monitoring.Namespace,
 				tc.testMonitoringInstance.Spec.MonitoringCommonSpec.Namespace)
 		}
 	}

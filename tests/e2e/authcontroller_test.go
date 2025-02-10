@@ -1,198 +1,197 @@
 package e2e_test
 
 import (
-	"errors"
-	"fmt"
+	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/resources"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
-	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	serviceApi "github.com/opendatahub-io/opendatahub-operator/v2/apis/services/v1alpha1"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster"
+	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster/gvk"
+	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/utils/test/matchers/jq"
+	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/utils/test/testf"
 
 	. "github.com/onsi/gomega"
 )
 
 type AuthControllerTestCtx struct {
-	*testContext
+	*TestContext
 	testAuthInstance serviceApi.Auth
 }
 
 func authControllerTestSuite(t *testing.T) {
 	t.Helper()
 
-	tc, err := NewTestContext()
-	require.NoError(t, err)
+	// Initialize the test context.
+	tc, err := NewTestContext(t)
+	require.NoError(t, err, "Failed to initialize test context")
 
-	authServiceCtx := AuthControllerTestCtx{
-		testContext: tc,
+	// Create an instance of test context.
+	authCtx := AuthControllerTestCtx{
+		TestContext: tc,
 	}
 
-	t.Run(tc.testDsc.Name, func(t *testing.T) {
-		t.Run("Auto creation of Auth CR", func(t *testing.T) {
-			err = authServiceCtx.validateAuthCRCreation()
-			require.NoError(t, err, "error getting Auth CR")
-		})
-		t.Run("Test Auth CR content", func(t *testing.T) {
-			err = authServiceCtx.validateAuthCRDefaultContent()
-			require.NoError(t, err, "unexpected content in Auth CR")
-		})
-		t.Run("Test role creation", func(t *testing.T) {
-			err = authServiceCtx.validateAuthCRRoleCreation()
-			require.NoError(t, err, "error getting created roles")
-		})
-		t.Run("Test rolebinding creation", func(t *testing.T) {
-			err = authServiceCtx.validateAuthCRRoleBindingCreation()
-			require.NoError(t, err, "error getting created rolebindings")
-		})
-		t.Run("Test rolebinding is added when group is added", func(t *testing.T) {
-			err = authServiceCtx.validateAddingGroups()
-			require.NoError(t, err, "error getting created rolebindings")
-		})
-		t.Run("Test clusterrole is added when group is added", func(t *testing.T) {
-			err = authServiceCtx.validateAuthCRClusterRoleCreation()
-			require.NoError(t, err, "error getting created rolebindings")
-		})
-		t.Run("Test clusterrolebinding is added when group is added", func(t *testing.T) {
-			err = authServiceCtx.validateAuthCRClusterRoleBindingCreation()
-			require.NoError(t, err, "error getting created rolebindings")
-		})
-	})
+	// Define test cases
+	testCases := []testCase{
+		{"Validate Auth CR creation", authCtx.validateAuthCRCreation},
+		{"Validate Auth CR default content", authCtx.validateAuthCRDefaultContent},
+		{"Validate Auth Role creation", authCtx.validateAuthCRRoleCreation},
+		{"Validate Auth RoleBinding creation", authCtx.validateAuthCRRoleBindingCreation},
+		{"Validate addition of RoleBinding when group is added", authCtx.validateAddingGroups},
+		{"Validate addition of ClusterRole when group is added", authCtx.validateAuthCRClusterRoleCreation},
+		{"Validate addition of ClusterRoleBinding when group is added", authCtx.validateAuthCRClusterRoleBindingCreation},
+	}
+
+	// Run the test suite
+	authCtx.RunTestCases(t, testCases)
 }
 
-func (tc *AuthControllerTestCtx) WithT(t *testing.T) *WithT {
+// validateAuthCRCreation checks if the Auth CR is created and validates it.
+func (tc *AuthControllerTestCtx) validateAuthCRCreation(t *testing.T) {
 	t.Helper()
 
-	g := NewWithT(t)
-	g.SetDefaultEventuallyTimeout(generalWaitTimeout)
-	g.SetDefaultEventuallyPollingInterval(1 * time.Second)
+	// Ensure that exactly one Auth CR exists.
+	u := tc.EnsureExactlyOneResourceExists(
+		gvk.Auth,
+		types.NamespacedName{Name: serviceApi.AuthInstanceName},
+	)
 
-	return g
+	// Convert the unstructured resource to the test instance.
+	tc.ConvertUnstructuredToResource(u, tc.testAuthInstance)
 }
 
-func (tc *AuthControllerTestCtx) validateAuthCRCreation() error {
-	authList := &serviceApi.AuthList{}
-	if err := tc.testContext.customClient.List(tc.ctx, authList); err != nil {
-		return fmt.Errorf("unable to find Auth CR instance: %w", err)
-	}
+// validateAuthCRDefaultContent validates the default content of the Auth CR.
+func (tc *AuthControllerTestCtx) validateAuthCRDefaultContent(t *testing.T) {
+	t.Helper()
 
-	switch {
-	case len(authList.Items) == 1:
-		tc.testAuthInstance = authList.Items[0]
-		return nil
-	case len(authList.Items) > 1:
-		return fmt.Errorf("only one Auth CR expected, found %v", len(authList.Items))
-	default:
-		return nil
-	}
-}
+	// Ensure AdminGroups is not empty.
+	tc.EnsureResourceConditionMet(tc.testAuthInstance, true, BeEmpty(), "AdminGroups should not be empty")
 
-func (tc *AuthControllerTestCtx) validateAuthCRDefaultContent() error {
-	if len(tc.testAuthInstance.Spec.AdminGroups) == 0 {
-		return errors.New("AdminGroups is empty ")
-	}
-
-	if tc.platform == cluster.SelfManagedRhoai || tc.platform == cluster.ManagedRhoai {
-		if tc.testAuthInstance.Spec.AdminGroups[0] != "rhods-admins" {
-			return fmt.Errorf("expected rhods-admins, found %v", tc.testAuthInstance.Spec.AdminGroups[0])
-		}
+	// Validate that the first AdminGroup is as expected based on the Platform.
+	adminGroup := tc.testAuthInstance.Spec.AdminGroups[0]
+	var expectedAdminGroup string
+	if tc.Platform == cluster.SelfManagedRhoai || tc.Platform == cluster.ManagedRhoai {
+		expectedAdminGroup = "rhods-admins"
 	} else {
-		if tc.testAuthInstance.Spec.AdminGroups[0] != "odh-admins" {
-			return fmt.Errorf("expected odh-admins, found %v", tc.testAuthInstance.Spec.AdminGroups[0])
-		}
+		expectedAdminGroup = "odh-admins"
 	}
 
-	if tc.testAuthInstance.Spec.AllowedGroups[0] != "system:authenticated" {
-		return fmt.Errorf("expected system:authenticated, found %v", tc.testAuthInstance.Spec.AllowedGroups[0])
-	}
+	tc.EnsureResourcesAreEqual(
+		adminGroup,
+		expectedAdminGroup,
+		"Expected '%s' as AdminGroup, but got: %v", expectedAdminGroup, adminGroup,
+	)
 
-	return nil
+	// Validate that AllowedGroups has 'system:authenticated'.
+	allowedGroup := tc.testAuthInstance.Spec.AllowedGroups[0]
+	expectedAllowedGroup := "system:authenticated"
+	tc.EnsureResourcesAreEqual(
+		allowedGroup,
+		expectedAllowedGroup,
+		"Expected '%s' as AdminGroup, but got: %v", expectedAdminGroup, adminGroup,
+	)
 }
 
-func (tc *AuthControllerTestCtx) validateAuthCRRoleCreation() error {
-	adminRole := &rbacv1.Role{}
-	allowedRole := &rbacv1.Role{}
+// validateAuthCRRoleCreation validates the creation of the roles for the Auth CR.
+func (tc *AuthControllerTestCtx) validateAuthCRRoleCreation(t *testing.T) {
+	t.Helper()
 
-	if err := tc.testContext.customClient.Get(tc.ctx, types.NamespacedName{Namespace: tc.applicationsNamespace, Name: "admingroup-role"}, adminRole); err != nil {
-		return err
+	// Validate the role for admin and allowed groups.
+	roles := []string{"admingroup-role", "allowedgroup-role"}
+	for _, roleName := range roles {
+		tc.EnsureResourceExists(
+			gvk.Role,
+			types.NamespacedName{Namespace: tc.ApplicationNamespace, Name: roleName},
+			"Expected admin Role %s to be created", roleName,
+		)
 	}
-
-	if err := tc.testContext.customClient.Get(tc.ctx, types.NamespacedName{Namespace: tc.applicationsNamespace, Name: "allowedgroup-role"}, allowedRole); err != nil {
-		return err
-	}
-
-	return nil
 }
 
-func (tc *AuthControllerTestCtx) validateAuthCRClusterRoleCreation() error {
-	adminClusterRole := &rbacv1.ClusterRole{}
+// validateAuthCRClusterRoleCreation validates the creation of the cluster role.
+func (tc *AuthControllerTestCtx) validateAuthCRClusterRoleCreation(t *testing.T) {
+	t.Helper()
 
-	if err := tc.testContext.customClient.Get(tc.ctx, types.NamespacedName{Namespace: tc.applicationsNamespace, Name: "admingroupcluster-role"}, adminClusterRole); err != nil {
-		return err
-	}
-
-	return nil
+	clusterRole := "admingroupcluster-role"
+	tc.EnsureResourceExists(
+		gvk.ClusterRole,
+		types.NamespacedName{Namespace: tc.ApplicationNamespace, Name: clusterRole},
+		"Expected admin ClusterRole %s to be created", clusterRole,
+	)
 }
 
-func (tc *AuthControllerTestCtx) validateAuthCRRoleBindingCreation() error {
-	adminRolebinding := &rbacv1.RoleBinding{}
-	allowedRolebinding := &rbacv1.RoleBinding{}
+// validateAuthCRRoleBindingCreation validates the creation of the role bindings.
+func (tc *AuthControllerTestCtx) validateAuthCRRoleBindingCreation(t *testing.T) {
+	t.Helper()
 
-	if err := tc.testContext.customClient.Get(tc.ctx, types.NamespacedName{Namespace: tc.applicationsNamespace, Name: "admingroup-rolebinding"}, adminRolebinding); err != nil {
-		return err
+	roleBindings := []string{"admingroup-rolebinding", "allowedgroup-rolebinding"}
+	for _, roleBinding := range roleBindings {
+		tc.EnsureResourceExists(
+			gvk.RoleBinding,
+			types.NamespacedName{Namespace: tc.ApplicationNamespace, Name: roleBinding},
+			"Expected admin RoleBinding %s to be created", roleBinding,
+		)
 	}
-
-	if err := tc.testContext.customClient.Get(tc.ctx, types.NamespacedName{Namespace: tc.applicationsNamespace, Name: "allowedgroup-rolebinding"}, allowedRolebinding); err != nil {
-		return err
-	}
-
-	return nil
 }
 
-func (tc *AuthControllerTestCtx) validateAuthCRClusterRoleBindingCreation() error {
-	adminClusterRolebinding := &rbacv1.ClusterRoleBinding{}
+// validateAuthCRClusterRoleBindingCreation validates the creation of the cluster role bindings.
+func (tc *AuthControllerTestCtx) validateAuthCRClusterRoleBindingCreation(t *testing.T) {
+	t.Helper()
 
-	if err := tc.testContext.customClient.Get(tc.ctx, types.NamespacedName{Namespace: tc.applicationsNamespace,
-		Name: "admingroupcluster-rolebinding"}, adminClusterRolebinding); err != nil {
-		return err
-	}
-
-	return nil
+	clusterRoleBinding := "admingroupcluster-rolebinding"
+	tc.EnsureResourceExists(
+		gvk.ClusterRoleBinding,
+		types.NamespacedName{Namespace: tc.ApplicationNamespace, Name: clusterRoleBinding},
+		"Expected admin ClusterRoleBinding %s to be created", clusterRoleBinding,
+	)
 }
 
-func (tc *AuthControllerTestCtx) validateAddingGroups() error {
-	tc.testAuthInstance.Spec.AdminGroups = append(tc.testAuthInstance.Spec.AdminGroups, "aTestAdminGroup")
-	tc.testAuthInstance.Spec.AllowedGroups = append(tc.testAuthInstance.Spec.AllowedGroups, "aTestAllowedGroup")
-	err := tc.customClient.Update(tc.ctx, &tc.testAuthInstance)
-	if err != nil {
-		fmt.Println("ERR: ", err)
-	}
+// validateAddingGroups adds groups and validates.
+func (tc *AuthControllerTestCtx) validateAddingGroups(t *testing.T) {
+	t.Helper()
 
-	adminRolebinding := &rbacv1.RoleBinding{}
-	adminClusterRolebinding := &rbacv1.ClusterRoleBinding{}
-	allowedRolebinding := &rbacv1.RoleBinding{}
+	g := tc.NewWithT(t)
 
-	if err := tc.testContext.customClient.Get(tc.ctx, types.NamespacedName{Namespace: tc.applicationsNamespace, Name: "admingroup-rolebinding"}, adminRolebinding); err != nil {
-		if adminRolebinding.Subjects[1].Name != "aTestAdminGroup" {
-			return fmt.Errorf("Expected aTestAdminGroup found %s ", adminRolebinding.Subjects[1].Name)
-		}
-	}
+	testAdminGroup := "aTestAdminGroup"
+	testAllowedGroup := "aTestAllowedGroup"
 
-	if err := tc.testContext.customClient.Get(tc.ctx, types.NamespacedName{Namespace: tc.applicationsNamespace,
-		Name: "admingroupcluster-rolebinding"}, adminClusterRolebinding); err != nil {
-		if adminRolebinding.Subjects[1].Name != "aTestAdminGroup" {
-			return fmt.Errorf("Expected aTestAdminGroup found %s ", adminRolebinding.Subjects[1].Name)
-		}
-	}
+	tc.EnsureResourceExistsOrCreate(
+		gvk.Auth,
+		resources.NamespacedNameFromObject(&tc.testAuthInstance),
+		testf.Transform(`.spec.adminGroups = %s, .spec.allowedGroups = %s`, testAdminGroup, testAllowedGroup),
+	)
 
-	if err := tc.testContext.customClient.Get(tc.ctx, types.NamespacedName{Namespace: tc.applicationsNamespace, Name: "allowedgroup-rolebinding"}, allowedRolebinding); err != nil {
-		if allowedRolebinding.Subjects[1].Name != "aTestAllowedGroup" {
-			return fmt.Errorf("Expected aTestAllowedGroup found %s ", allowedRolebinding.Subjects[1].Name)
-		}
-	}
+	g.Update(
+		gvk.Auth,
+		client.ObjectKeyFromObject(&tc.testAuthInstance),
+		testf.Transform(`.spec.adminGroups = %s, .spec.allowedGroups = %s`, testAdminGroup, testAllowedGroup),
+	).Eventually().Should(
+		jq.Match(`.spec.adminGroups == %s`, testAdminGroup),
+		jq.Match(`.spec.allowedGroups == %s`, testAllowedGroup),
+	)
 
-	return nil
+	// tc.testAuthInstance.Spec.AdminGroups = append(tc.testAuthInstance.Spec.AdminGroups, "aTestAdminGroup")
+	// tc.testAuthInstance.Spec.AllowedGroups = append(tc.testAuthInstance.Spec.AllowedGroups, "aTestAllowedGroup")
+	// err := tc.Client().Update(tc.Context(), &tc.testAuthInstance)
+	//require.NoError(t, err, "Error updating Auth instance")
+
+	// Validate added admin RoleBinding
+	g.Get(gvk.RoleBinding, types.NamespacedName{Namespace: tc.ApplicationNamespace, Name: "admingroup-rolebinding"}).
+		Eventually().Should(
+		jq.Match(`.subjects[0].name == "%s"`, testAdminGroup),
+	)
+
+	// Validate added admin cluster RoleBinding
+	g.Get(gvk.ClusterRoleBinding, types.NamespacedName{Namespace: tc.ApplicationNamespace, Name: "admingroupcluster-rolebinding"}).
+		Eventually().Should(
+		jq.Match(`.subjects[0].name == "%s"`, testAdminGroup),
+	)
+
+	// Validate added allowed RoleBinding
+	g.Get(gvk.RoleBinding, types.NamespacedName{Namespace: tc.ApplicationNamespace, Name: "allowedgroup-rolebinding"}).
+		Eventually().Should(
+		jq.Match(`.subjects[0].name == "%s"`, testAllowedGroup),
+	)
 }

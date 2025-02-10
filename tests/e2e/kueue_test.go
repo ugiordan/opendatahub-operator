@@ -119,11 +119,11 @@ func (tc *KueueTestCtx) validateKueuePreCheck(t *testing.T) {
 		return k8serr.IsNotFound(err)
 	}).Should(BeTrue())
 
-	c1 := mockCRDcreation("kueue.x-k8s.io", "v1alpha1", "multikueuecluster", "kueue")
+	c1 := mockCRDCreation("kueue.x-k8s.io", "v1alpha1", "multikueuecluster", "kueue")
 	e1 := tc.Client().Create(context.Background(), c1)
 	g.Expect(e1).ToNot(HaveOccurred())
 
-	c2 := mockCRDcreation("kueue.x-k8s.io", "v1alpha1", "multikueueconfig", "kueue")
+	c2 := mockCRDCreation("kueue.x-k8s.io", "v1alpha1", "multikueueconfig", "kueue")
 	e2 := tc.Client().Create(context.Background(), c2)
 	g.Expect(e2).ToNot(HaveOccurred())
 

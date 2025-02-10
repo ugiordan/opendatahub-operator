@@ -40,15 +40,13 @@ func modelRegistryTestSuite(t *testing.T) {
 	t.Run("Validate component spec", componentCtx.validateSpec)
 	t.Run("Validate operands have OwnerReferences", componentCtx.ValidateOperandsOwnerReferences)
 	t.Run("Validate update operand resources", componentCtx.ValidateUpdateDeploymentsResources)
-
 	t.Run("Validate watched resources", componentCtx.validateOperandsWatchedResources)
 	t.Run("Validate dynamically watches operands", componentCtx.validateOperandsDynamicallyWatchedResources)
 	t.Run("Validate CRDs reinstated", componentCtx.validateCRDReinstated)
 	t.Run("Validate cert", componentCtx.validateModelRegistryCert)
 	t.Run("Validate ServiceMeshMember", componentCtx.validateModelRegistryServiceMeshMember)
-
-	t.Run("Validate component disabled", componentCtx.ValidateComponentDisabled)
 	t.Run("Validate component releases", componentCtx.ValidateComponentReleases)
+	t.Run("Validate component disabled", componentCtx.ValidateComponentDisabled)
 }
 
 func (c *ModelRegistryTestCtx) validateSpec(t *testing.T) {

@@ -53,30 +53,33 @@ const (
 	dscKind                  = "DataScienceCluster"
 )
 
+// waitForCondition waits for a condition to be met within a timeout.
+func (tc *testContext) waitForCondition(ctx context.Context, interval, timeout time.Duration, conditionFn func(context.Context) (bool, error)) error {
+	return wait.PollUntilContextTimeout(ctx, interval, timeout, false, conditionFn)
+}
+
+// waitForOperatorDeployment ensures an operator deployment is ready.
 func (tc *testContext) waitForOperatorDeployment(name string, replicas int32) error {
-	err := wait.PollUntilContextTimeout(tc.ctx, generalRetryInterval, operatorReadyTimeout, false, func(ctx context.Context) (bool, error) {
+	conditionFn := func(ctx context.Context) (bool, error) {
 		controllerDeployment, err := tc.kubeClient.AppsV1().Deployments(tc.operatorNamespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			if k8serr.IsNotFound(err) {
 				return false, nil
 			}
-			log.Printf("Failed to get %s controller deployment", name)
-
+			log.Printf("Failed to get %s controller deployment: %v", name, err)
 			return false, err
 		}
 
 		for _, condition := range controllerDeployment.Status.Conditions {
-			if condition.Type == appsv1.DeploymentAvailable {
-				if condition.Status == corev1.ConditionTrue && controllerDeployment.Status.ReadyReplicas == replicas {
-					return true, nil
-				}
+			if condition.Type == appsv1.DeploymentAvailable && condition.Status == corev1.ConditionTrue && controllerDeployment.Status.ReadyReplicas == replicas {
+				return true, nil
 			}
 		}
-		log.Printf("Error in %s deployment", name)
+		log.Printf("Error in %s deployment, waiting for readiness", name)
 		return false, nil
-	})
+	}
 
-	return err
+	return tc.waitForCondition(tc.ctx, generalRetryInterval, operatorReadyTimeout, conditionFn)
 }
 
 func (tc *testContext) getComponentDeployments(componentGVK schema.GroupVersionKind) ([]appsv1.Deployment, error) {
@@ -93,7 +96,7 @@ func (tc *testContext) getComponentDeployments(componentGVK schema.GroupVersionK
 	)
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list deployments: %w", err)
 	}
 
 	return deployments.Items, nil

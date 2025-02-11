@@ -60,7 +60,7 @@ func (tc *testContext) waitForCondition(ctx context.Context, interval, timeout t
 
 // waitForOperatorDeployment ensures an operator deployment is ready.
 func (tc *testContext) waitForOperatorDeployment(name string, replicas int32) error {
-	conditionFn := func(ctx context.Context) (bool, error) {
+	isDeploymentAvailable := func(ctx context.Context) (bool, error) {
 		controllerDeployment, err := tc.kubeClient.AppsV1().Deployments(tc.operatorNamespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			if k8serr.IsNotFound(err) {
@@ -79,9 +79,10 @@ func (tc *testContext) waitForOperatorDeployment(name string, replicas int32) er
 		return false, nil
 	}
 
-	return tc.waitForCondition(tc.ctx, generalRetryInterval, operatorReadyTimeout, conditionFn)
+	return tc.waitForCondition(tc.ctx, generalRetryInterval, operatorReadyTimeout, isDeploymentAvailable)
 }
 
+// getComponentDeployments fetches component deployments.
 func (tc *testContext) getComponentDeployments(componentGVK schema.GroupVersionKind) ([]appsv1.Deployment, error) {
 	deployments := appsv1.DeploymentList{}
 	err := tc.customClient.List(
@@ -102,6 +103,7 @@ func (tc *testContext) getComponentDeployments(componentGVK schema.GroupVersionK
 	return deployments.Items, nil
 }
 
+// setupDSCICR creates a DSC Initialization CR.
 func setupDSCICR(name string) *dsciv1.DSCInitialization {
 	dsciTest := &dsciv1.DSCInitialization{
 		ObjectMeta: metav1.ObjectMeta{
@@ -134,6 +136,7 @@ func setupDSCICR(name string) *dsciv1.DSCInitialization {
 	return dsciTest
 }
 
+// setupDSCInstance creates a Data Science Cluster CR.
 func setupDSCInstance(name string) *dscv1.DataScienceCluster {
 	dscTest := &dscv1.DataScienceCluster{
 		ObjectMeta: metav1.ObjectMeta{
@@ -231,6 +234,7 @@ func setupDSCInstance(name string) *dscv1.DataScienceCluster {
 	return dscTest
 }
 
+// setupSubscription creates a subscription object.
 func setupSubscription(name string, ns string) *ofapi.Subscription {
 	return &ofapi.Subscription{
 		ObjectMeta: metav1.ObjectMeta{
@@ -247,13 +251,14 @@ func setupSubscription(name string, ns string) *ofapi.Subscription {
 	}
 }
 
+// validateCRD checks if a CRD is fully established by waiting for its "Established" condition.
 func (tc *testContext) validateCRD(crdName string) error {
 	crd := &apiextv1.CustomResourceDefinition{}
 	obj := client.ObjectKey{
 		Name: crdName,
 	}
 
-	err := wait.PollUntilContextTimeout(tc.ctx, generalRetryInterval, crdReadyTimeout, false, func(ctx context.Context) (bool, error) {
+	isCrdEstablished := func(ctx context.Context) (bool, error) {
 		err := tc.customClient.Get(ctx, obj, crd)
 		if err != nil {
 			if k8serr.IsNotFound(err) {
@@ -274,15 +279,17 @@ func (tc *testContext) validateCRD(crdName string) error {
 		log.Printf("Error to get CRD %s condition's matching", crdName)
 
 		return false, nil
-	})
+	}
 
-	return err
+	return tc.waitForCondition(tc.ctx, generalRetryInterval, crdReadyTimeout, isCrdEstablished)
 }
 
+// wait waits for a condition function to be satisfied within a timeout.
 func (tc *testContext) wait(isReady func(ctx context.Context) (bool, error)) error {
 	return wait.PollUntilContextTimeout(tc.ctx, generalRetryInterval, generalWaitTimeout, true, isReady)
 }
 
+// getCSV retrieves the ClusterServiceVersion for an operator by name and namespace.
 func getCSV(ctx context.Context, cli client.Client, name string, namespace string) (*ofapi.ClusterServiceVersion, error) {
 	isMatched := func(csv *ofapi.ClusterServiceVersion, name string) bool {
 		return strings.Contains(csv.ObjectMeta.Name, name)
@@ -308,7 +315,7 @@ func getCSV(ctx context.Context, cli client.Client, name string, namespace strin
 	return nil, k8serr.NewNotFound(schema.GroupResource{}, name)
 }
 
-// Use existing or create a new one.
+// getSubscription fetches or creates a subscription for an operator.
 func getSubscription(tc *testContext, name string, ns string) (*ofapi.Subscription, error) {
 	createSubscription := func(name string, ns string) (*ofapi.Subscription, error) {
 		// this just creates a manifest
@@ -338,6 +345,7 @@ func getSubscription(tc *testContext, name string, ns string) (*ofapi.Subscripti
 	return sub, nil
 }
 
+// waitCSV waits for a ClusterServiceVersion to be in the "Succeeded" phase.
 func waitCSV(tc *testContext, name string, ns string) error {
 	interval := generalRetryInterval
 	isReady := func(ctx context.Context) (bool, error) {
@@ -360,6 +368,7 @@ func waitCSV(tc *testContext, name string, ns string) error {
 	return nil
 }
 
+// getInstallPlanName retrieves the name of the InstallPlan associated with a subscription.
 func getInstallPlanName(tc *testContext, name string, ns string) (string, error) {
 	sub := &ofapi.Subscription{}
 
@@ -374,12 +383,13 @@ func getInstallPlanName(tc *testContext, name string, ns string) (string, error)
 	})
 
 	if err != nil {
-		return "", fmt.Errorf("Error creating subscription %s: %w", name, err)
+		return "", fmt.Errorf("error creating subscription %s: %w", name, err)
 	}
 
 	return sub.Status.InstallPlanRef.Name, nil
 }
 
+// approveInstallPlan approves the InstallPlan to proceed with the installation.
 func getInstallPlan(tc *testContext, name string, ns string) (*ofapi.InstallPlan, error) {
 	// it creates subscription under the hood if needed and waits for InstallPlan reference
 	planName, err := getInstallPlanName(tc, name, ns)
@@ -449,6 +459,7 @@ func ensureOperator(tc *testContext, name string, ns string) error {
 	return waitCSV(tc, name, ns)
 }
 
+// Ensure multiple operators are installed concurrently using WaitGroup.
 func ensureServicemeshOperators(t *testing.T, tc *testContext) error { //nolint: thelper
 	ops := []string{
 		serverlessOpName,

@@ -2,22 +2,20 @@ package e2e_test
 
 import (
 	"fmt"
-	gomegaTypes "github.com/onsi/gomega/types"
-	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/resources"
-	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/utils/test/testf"
 	"testing"
 
-	operatorv1 "github.com/openshift/api/operator/v1"
+	gomegaTypes "github.com/onsi/gomega/types"
+	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/utils/test/testf"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	. "github.com/onsi/gomega"
 	infrav1 "github.com/opendatahub-io/opendatahub-operator/v2/apis/infrastructure/v1"
 	modelregistryctrl "github.com/opendatahub-io/opendatahub-operator/v2/controllers/components/modelregistry"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster/gvk"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/metadata/labels"
-
-	. "github.com/onsi/gomega"
+	operatorv1 "github.com/openshift/api/operator/v1"
 )
 
 const (
@@ -26,11 +24,12 @@ const (
 	dscInstanceNameDuplicate  = "e2e-test-dsc-duplicate"  // Instance name for the duplicate DSC resource
 )
 
-// DSCIManagementTestCtx holds the context for the DSCI and DSC management tests.
+// DSCTestCtx holds the context for the DSCI and DSC management tests.
 type DSCTestCtx struct {
 	*TestContext
 }
 
+// dscManagementTestSuite runs the DSC and DSCI management test suite.
 func dscManagementTestSuite(t *testing.T) {
 	t.Helper()
 
@@ -66,7 +65,7 @@ func dscManagementTestSuite(t *testing.T) {
 	dscTestCtx.RunTestCases(t, testCases)
 }
 
-// setUp ensures the Service Mesh and Serverless operators  are concurrently installed.
+// validateOperatorsInstallation ensures the Service Mesh and Serverless operators are installed.
 func (tc *DSCTestCtx) validateOperatorsInstallation(t *testing.T) {
 	t.Helper()
 
@@ -76,7 +75,7 @@ func (tc *DSCTestCtx) validateOperatorsInstallation(t *testing.T) {
 		{Name: serverlessOpName, Namespace: serverlessOperatorNamespace},
 	}
 
-	// Create test cases.
+	// Create and run test cases in parallel.
 	testCases := make([]testCase, len(operators))
 	for i, op := range operators {
 		testCases[i] = testCase{
@@ -88,31 +87,30 @@ func (tc *DSCTestCtx) validateOperatorsInstallation(t *testing.T) {
 		}
 	}
 
-	// Run test cases in parallel.
 	tc.RunTestCases(t, testCases, WithParallel())
 }
 
-// validateDSCICreation validate the creation of a DSCInitialization.
+// validateDSCICreation validates the creation of a DSCInitialization.
 func (tc *DSCTestCtx) validateDSCICreation(t *testing.T) {
 	t.Helper()
 
 	tc.EnsureResourceCreatedOrUpdated(
 		gvk.DSCInitialization,
-		types.NamespacedName{Namespace: tc.TestDSCI.Namespace, Name: tc.TestDSCI.Name},
+		types.NamespacedName{Namespace: tc.DSCI.Namespace, Name: tc.DSCI.Name},
 		NoOpMutationFn,
-		"Failed to create DSCI resource %s", tc.TestDSCI.Name,
+		"Failed to create DSCI resource %s", tc.DSCI.Name,
 	)
 }
 
-// validateDSCCreation validate the creation of a DataScienceCluster.
+// validateDSCCreation validates the creation of a DataScienceCluster.
 func (tc *DSCTestCtx) validateDSCCreation(t *testing.T) {
 	t.Helper()
 
 	tc.EnsureResourceCreatedOrUpdated(
 		gvk.DataScienceCluster,
-		types.NamespacedName{Namespace: tc.TestDsc.Namespace, Name: tc.TestDsc.Name},
+		types.NamespacedName{Namespace: tc.DSC.Namespace, Name: tc.DSC.Name},
 		NoOpMutationFn,
-		"Failed to create DSC resource %s", tc.TestDsc.Name,
+		"Failed to create DSC resource %s", tc.DSC.Name,
 	)
 }
 
@@ -134,10 +132,9 @@ func (tc *DSCTestCtx) validateServiceMeshSpecInDSCI(t *testing.T) {
 	}
 
 	// actual ServiceMeshSpec
-	act := tc.TestDSCI
+	act := tc.DSCI
 
 	// Assert that the actual ServiceMeshSpec matches the expected one using require
-	tc.EnsureResourceNotNil(act)
 	tc.EnsureResourcesAreEqual(
 		act.Spec.ServiceMesh,
 		expServiceMeshSpec,
@@ -161,10 +158,9 @@ func (tc *DSCTestCtx) validateKnativeSpecInDSC(t *testing.T) {
 	}
 
 	// actual ServingSpec
-	act := tc.TestDsc
+	act := tc.DSC
 
 	// Assert that the actual ServingSpec matches the expected one using require
-	tc.EnsureResourceNotNil(act)
 	tc.EnsureResourcesAreEqual(
 		act.Spec.Components.Kserve.Serving,
 		expServingSpec,
@@ -185,13 +181,11 @@ func (tc *DSCTestCtx) validateOwnedNamespacesAllExist(t *testing.T) {
 	)
 }
 
-// validateDSCDuplication ensures that no duplicate DSCInitialization resource can be created.
+// validateDSCIDuplication ensures that no duplicate DSCInitialization resource can be created.
 func (tc *DSCTestCtx) validateDSCIDuplication(t *testing.T) {
 	t.Helper()
 
 	dup := CreateDSCI(dsciInstanceNameDuplicate)
-
-	// assert that a duplicate DSCI Initialization cannot be created.
 	tc.EnsureResourceIsUnique(dup, "Error validating DSCI duplication")
 }
 
@@ -200,8 +194,6 @@ func (tc *DSCTestCtx) validateDSCDuplication(t *testing.T) {
 	t.Helper()
 
 	dup := CreateDSC(dscInstanceNameDuplicate)
-
-	// assert that a duplicate DSC Initialization cannot be created.
 	tc.EnsureResourceIsUnique(dup, "Error validating DSC duplication")
 }
 
@@ -210,7 +202,7 @@ func (tc *DSCTestCtx) validateModelRegistryConfig(t *testing.T) {
 	t.Helper()
 
 	// Check if the ModelRegistry is managed
-	if tc.TestDsc.Spec.Components.ModelRegistry.ManagementState == operatorv1.Managed {
+	if tc.DSC.Spec.Components.ModelRegistry.ManagementState == operatorv1.Managed {
 		// Ensure changing registriesNamespace is not allowed and expect failure
 		tc.UpdateRegistriesNamespace(testNamespace, modelregistryctrl.DefaultModelRegistriesNamespace, true)
 
@@ -227,21 +219,6 @@ func (tc *DSCTestCtx) validateModelRegistryConfig(t *testing.T) {
 }
 
 // UpdateRegistriesNamespace updates the ModelRegistry component's `RegistriesNamespace` field
-// in the DSC object and verifies the outcome using Gomega assertions.
-//
-// It applies a JSON MergePatch to modify the `registriesNamespace` field, ensuring the update
-// either succeeds or fails based on the `shouldFail` flag. After patching, it asserts that the
-// `RegistriesNamespace` field matches the expected value.
-//
-// Parameters:
-//   - newNamespace (string): The new namespace to set in the ModelRegistry component.
-//   - expectedValue (string): The expected value of the `RegistriesNamespace` field after patching.
-//   - shouldFail (bool): If true, the function expects an error during patching; otherwise, it expects success.
-//
-// Example Usage:
-//
-//	err := tc.UpdateRegistriesNamespace("custom-namespace", "custom-namespace", false)
-//	tc.g.Expect(err).ToNot(HaveOccurred())
 func (tc *DSCTestCtx) UpdateRegistriesNamespace(newNamespace, expectedValue string, shouldFail bool) {
 	// Define the expected condition based on the shouldFail flag
 	var condition gomegaTypes.GomegaMatcher
@@ -256,7 +233,7 @@ func (tc *DSCTestCtx) UpdateRegistriesNamespace(newNamespace, expectedValue stri
 	// Update the registriesNamespace field.
 	tc.EnsureResourceCreatedOrPatchedWithCondition(
 		gvk.Auth,
-		resources.NamespacedNameFromObject(tc.TestDsc),
+		tc.DSCNamespacedName,
 		testf.Transform(`.spec.components[].modelregistry.registriesNamespace |= "%s"`, newNamespace),
 		condition,
 		"Failed to update RegistriesNamespace to %s, expected %s", newNamespace, expectedValue,
@@ -265,9 +242,8 @@ func (tc *DSCTestCtx) UpdateRegistriesNamespace(newNamespace, expectedValue stri
 	// If patching succeeded and should not fail, verify the RegistriesNamespace value
 	if !shouldFail {
 		tc.EnsureResourcesAreEqual(
-			tc.TestDsc.Spec.Components.ModelRegistry.RegistriesNamespace,
+			tc.DSC.Spec.Components.ModelRegistry.RegistriesNamespace,
 			expectedValue,
-			"Expected RegistriesNamespace to be %s, but got %s", expectedValue, tc.TestDsc.Spec.Components.ModelRegistry.RegistriesNamespace)
-
+			"Expected RegistriesNamespace to be %s, but got %s", expectedValue, tc.DSC.Spec.Components.ModelRegistry.RegistriesNamespace)
 	}
 }

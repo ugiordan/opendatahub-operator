@@ -27,7 +27,7 @@ import (
 func kueueTestSuite(t *testing.T) {
 	t.Helper()
 
-	ct, err := NewComponentTestCtx(&componentApi.Kueue{})
+	ct, err := NewComponentTestCtx(t, &componentApi.Kueue{})
 	require.NoError(t, err)
 
 	componentCtx := KueueTestCtx{

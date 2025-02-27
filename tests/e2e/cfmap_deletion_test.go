@@ -22,7 +22,7 @@ type CfgMapDeletionTestCtx struct {
 	configMapNamespacedName types.NamespacedName
 }
 
-// cfgMapDeletionTestSuite handles the main testing flow for DSC deletion logic via ConfigMap.
+// cfgMapDeletionTestSuite runs the testing flow for DSC deletion logic via ConfigMap.
 func cfgMapDeletionTestSuite(t *testing.T) {
 	t.Helper()
 
@@ -31,12 +31,12 @@ func cfgMapDeletionTestSuite(t *testing.T) {
 	require.NoError(t, err, "Failed to initialize test context")
 
 	// Create an instance of test context.
-	cfgMapDeletionTestCtx := CfgMapDeletionTestCtx{
+	cfgMapDeletionTestCtx := &CfgMapDeletionTestCtx{
 		TestContext:             tc,
 		configMapNamespacedName: types.NamespacedName{Name: deleteConfigMap, Namespace: tc.OperatorNamespace},
 	}
 
-	// Ensuring ConfigMap cleanup after tests
+	// Ensure ConfigMap cleanup after tests
 	defer cfgMapDeletionTestCtx.removeDeletionConfigMap(t)
 
 	// Define test cases
@@ -62,7 +62,7 @@ func (tc *CfgMapDeletionTestCtx) validateDSCDeletionUsingConfigMap(t *testing.T)
 		Eventually().ShouldNot(BeNil(), "Failed to create or update deletion config map")
 
 	// Verify the existence of the DSC instance.
-	tc.EnsureResourceExists(gvk.DataScienceCluster, types.NamespacedName{Name: tc.TestDsc.Name})
+	tc.EnsureResourceExists(gvk.DataScienceCluster, types.NamespacedName{Name: tc.DSC.Name})
 }
 
 // validateOwnedNamespacesAllExist verifies that the owned namespaces exist.

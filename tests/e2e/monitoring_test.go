@@ -28,7 +28,7 @@ func monitoringTestSuite(t *testing.T) {
 		TestContext: tc,
 	}
 
-	t.Run(tc.TestDsc.Name, func(t *testing.T) {
+	t.Run(tc.DSC.Name, func(t *testing.T) {
 		t.Run("Auto creation of Monitoring CR", func(t *testing.T) {
 			err = monitoringServiceCtx.validateMonitoringCRCreation()
 			require.NoError(t, err, "error getting Auth CR")
@@ -42,7 +42,7 @@ func monitoringTestSuite(t *testing.T) {
 }
 
 func (tc *MonitoringTestCtx) validateMonitoringCRCreation() error {
-	if tc.TestDSCI.Spec.Monitoring.ManagementState == operatorv1.Removed {
+	if tc.DSCI.Spec.Monitoring.ManagementState == operatorv1.Removed {
 		return nil
 	}
 	monitoringList := &serviceApi.MonitoringList{}
@@ -63,8 +63,8 @@ func (tc *MonitoringTestCtx) validateMonitoringCRCreation() error {
 
 func (tc *MonitoringTestCtx) validateMonitoringCRDefaultContent() error {
 	if tc.Platform == cluster.ManagedRhoai {
-		if tc.testMonitoringInstance.Spec.MonitoringCommonSpec.Namespace != tc.TestDSCI.Spec.Monitoring.Namespace {
-			return fmt.Errorf("unexpected monitoring namespace reference. Expected %v, got %v", tc.TestDSCI.Spec.Monitoring.Namespace,
+		if tc.testMonitoringInstance.Spec.MonitoringCommonSpec.Namespace != tc.DSCI.Spec.Monitoring.Namespace {
+			return fmt.Errorf("unexpected monitoring namespace reference. Expected %v, got %v", tc.DSCI.Spec.Monitoring.Namespace,
 				tc.testMonitoringInstance.Spec.MonitoringCommonSpec.Namespace)
 		}
 	}

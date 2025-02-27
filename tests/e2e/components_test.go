@@ -1,7 +1,6 @@
 package e2e_test
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -15,8 +14,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/opendatahub-io/opendatahub-operator/v2/apis/common"
-	dscv1 "github.com/opendatahub-io/opendatahub-operator/v2/apis/datasciencecluster/v1"
-	dsciv1 "github.com/opendatahub-io/opendatahub-operator/v2/apis/dscinitialization/v1"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster/gvk"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/metadata/labels"
@@ -27,47 +24,28 @@ import (
 	. "github.com/onsi/gomega"
 )
 
+// ComponentTestCtx holds the context for component tests.
 type ComponentTestCtx struct {
 	*TestContext
 	// Any additional fields specific to component tests
 	ComponentGVK schema.GroupVersionKind
 }
 
+// NewComponentTestCtx initializes a new component test context.
 func NewComponentTestCtx(t *testing.T, object common.PlatformObject) (*ComponentTestCtx, error) {
 	baseCtx, err := NewTestContext(t)
 	if err != nil {
 		return nil, err
 	}
 
-	ogvk, err := resources.GetGroupVersionKindForObject(tcf.Scheme(), object)
+	ogvk, err := resources.GetGroupVersionKindForObject(baseCtx.Scheme(), object)
 	if err != nil {
 		return nil, err
 	}
 
-	dsciList := dsciv1.DSCInitializationList{}
-	if err := tcf.Client().List(tcf.Context(), &dsciList); err != nil {
-		return nil, err
-	}
-
-	if len(dsciList.Items) != 1 {
-		return nil, fmt.Errorf("failure looking up DSCInitialization, expected=1, found=%d", len(dsciList.Items))
-	}
-
-	dscList := dscv1.DataScienceClusterList{}
-	if err := tcf.Client().List(tcf.Context(), &dscList); err != nil {
-		return nil, err
-	}
-
-	if len(dscList.Items) != 1 {
-		return nil, fmt.Errorf("failure looking up DataScienceCluster, expected=1, found=%d", len(dscList.Items))
-	}
-
 	componentCtx := ComponentTestCtx{
-		TestContext:          baseCtx,
-		ComponentGVK:         ogvk,
-		DSCName:              client.ObjectKeyFromObject(&dscList.Items[0]),
-		DSCIName:             client.ObjectKeyFromObject(&dsciList.Items[0]),
-		ApplicationNamespace: dsciList.Items[0].Spec.ApplicationsNamespace,
+		TestContext:  baseCtx,
+		ComponentGVK: ogvk,
 	}
 
 	return &componentCtx, nil
@@ -78,21 +56,21 @@ func (c *ComponentTestCtx) ValidateComponentEnabled(t *testing.T) {
 
 	g.Update(
 		gvk.DataScienceCluster,
-		c.DSCName,
-		testf.Transform(`.spec.components.%s.managementState = "%s"`, strings.ToLower(c.GVK.Kind), operatorv1.Managed),
+		c.DSCNamespacedName,
+		testf.Transform(`.spec.components.%s.managementState = "%s"`, strings.ToLower(c.ComponentGVK.Kind), operatorv1.Managed),
 	).Eventually().Should(
-		jq.Match(`.spec.components.%s.managementState == "%s"`, strings.ToLower(c.GVK.Kind), operatorv1.Managed),
+		jq.Match(`.spec.components.%s.managementState == "%s"`, strings.ToLower(c.ComponentGVK.Kind), operatorv1.Managed),
 	)
 
 	g.List(gvk.DataScienceCluster).Eventually().Should(And(
 		HaveLen(1),
 		HaveEach(And(
-			jq.Match(`.spec.components.%s.managementState == "%s"`, strings.ToLower(c.GVK.Kind), operatorv1.Managed),
-			jq.Match(`.status.conditions[] | select(.type == "%sReady") | .status == "%s"`, c.GVK.Kind, metav1.ConditionTrue),
+			jq.Match(`.spec.components.%s.managementState == "%s"`, strings.ToLower(c.ComponentGVK.Kind), operatorv1.Managed),
+			jq.Match(`.status.conditions[] | select(.type == "%sReady") | .status == "%s"`, c.ComponentGVK.Kind, metav1.ConditionTrue),
 		)),
 	))
 
-	g.List(c.GVK).Eventually().Should(And(
+	g.List(c.ComponentGVK).Eventually().Should(And(
 		HaveLen(1),
 		HaveEach(And(
 			jq.Match(`.metadata.ownerReferences[0].kind == "%s"`, gvk.DataScienceCluster.Kind),
@@ -107,11 +85,11 @@ func (c *ComponentTestCtx) ValidateOperandsOwnerReferences(t *testing.T) {
 	g.List(
 		gvk.Deployment,
 		client.InNamespace(c.ApplicationNamespace),
-		client.MatchingLabels{labels.PlatformPartOf: strings.ToLower(c.GVK.Kind)},
+		client.MatchingLabels{labels.PlatformPartOf: strings.ToLower(c.ComponentGVK.Kind)},
 	).Eventually().Should(And(
 		Not(BeEmpty()),
 		HaveEach(
-			jq.Match(`.metadata.ownerReferences[0].kind == "%s"`, c.GVK.Kind),
+			jq.Match(`.metadata.ownerReferences[0].kind == "%s"`, c.ComponentGVK.Kind),
 		),
 	))
 }
@@ -123,7 +101,7 @@ func (c *ComponentTestCtx) ValidateUpdateDeploymentsResources(t *testing.T) {
 		gvk.Deployment,
 		client.InNamespace(c.ApplicationNamespace),
 		client.MatchingLabels{
-			labels.PlatformPartOf: strings.ToLower(c.GVK.Kind),
+			labels.PlatformPartOf: strings.ToLower(c.ComponentGVK.Kind),
 		},
 	).Eventually().ShouldNot(
 		BeEmpty(),
@@ -167,19 +145,19 @@ func (c *ComponentTestCtx) ValidateUpdateDeploymentsResources(t *testing.T) {
 func (c *ComponentTestCtx) ValidateComponentDisabled(t *testing.T) {
 	g := c.NewWithT(t)
 
-	g.List(c.GVK).Eventually().ShouldNot(
+	g.List(c.ComponentGVK).Eventually().ShouldNot(
 		BeEmpty(),
 	)
 
 	g.Update(
 		gvk.DataScienceCluster,
-		c.DSCName,
-		testf.Transform(`.spec.components.%s.managementState = "%s"`, strings.ToLower(c.GVK.Kind), operatorv1.Removed),
+		c.DSCNamespacedName,
+		testf.Transform(`.spec.components.%s.managementState = "%s"`, strings.ToLower(c.ComponentGVK.Kind), operatorv1.Removed),
 	).Eventually().Should(
-		jq.Match(`.spec.components.%s.managementState == "%s"`, strings.ToLower(c.GVK.Kind), operatorv1.Removed),
+		jq.Match(`.spec.components.%s.managementState == "%s"`, strings.ToLower(c.ComponentGVK.Kind), operatorv1.Removed),
 	)
 
-	g.List(c.GVK).Eventually().Should(
+	g.List(c.ComponentGVK).Eventually().Should(
 		BeEmpty(),
 	)
 
@@ -187,7 +165,7 @@ func (c *ComponentTestCtx) ValidateComponentDisabled(t *testing.T) {
 		gvk.Deployment,
 		client.InNamespace(c.ApplicationNamespace),
 		client.MatchingLabels{
-			labels.PlatformPartOf: strings.ToLower(c.GVK.Kind),
+			labels.PlatformPartOf: strings.ToLower(c.ComponentGVK.Kind),
 		},
 	).Eventually().Should(
 		BeEmpty(),
@@ -196,8 +174,8 @@ func (c *ComponentTestCtx) ValidateComponentDisabled(t *testing.T) {
 	g.List(gvk.DataScienceCluster).Eventually().Should(And(
 		HaveLen(1),
 		HaveEach(And(
-			jq.Match(`.spec.components.%s.managementState == "%s"`, strings.ToLower(c.GVK.Kind), operatorv1.Removed),
-			jq.Match(`.status.conditions[] | select(.type == "%sReady") | .status == "%s"`, c.GVK.Kind, metav1.ConditionFalse),
+			jq.Match(`.spec.components.%s.managementState == "%s"`, strings.ToLower(c.ComponentGVK.Kind), operatorv1.Removed),
+			jq.Match(`.status.conditions[] | select(.type == "%sReady") | .status == "%s"`, c.ComponentGVK.Kind, metav1.ConditionFalse),
 		)),
 	))
 }
@@ -210,13 +188,13 @@ func (c *ComponentTestCtx) ValidateCRDReinstated(t *testing.T, name string, vers
 
 	g.Update(
 		gvk.DataScienceCluster,
-		c.DSCName,
-		testf.Transform(`.spec.components.%s.managementState = "%s"`, strings.ToLower(c.GVK.Kind), operatorv1.Removed),
+		c.DSCNamespacedName,
+		testf.Transform(`.spec.components.%s.managementState = "%s"`, strings.ToLower(c.ComponentGVK.Kind), operatorv1.Removed),
 	).Eventually().Should(
-		jq.Match(`.spec.components.%s.managementState == "%s"`, strings.ToLower(c.GVK.Kind), operatorv1.Removed),
+		jq.Match(`.spec.components.%s.managementState == "%s"`, strings.ToLower(c.ComponentGVK.Kind), operatorv1.Removed),
 	)
 
-	g.List(c.GVK).Eventually().Should(
+	g.List(c.ComponentGVK).Eventually().Should(
 		BeEmpty(),
 	)
 	g.List(gvk.CustomResourceDefinition, crdSel).Eventually().Should(
@@ -237,13 +215,13 @@ func (c *ComponentTestCtx) ValidateCRDReinstated(t *testing.T, name string, vers
 
 	g.Update(
 		gvk.DataScienceCluster,
-		c.DSCName,
-		testf.Transform(`.spec.components.%s.managementState = "%s"`, strings.ToLower(c.GVK.Kind), operatorv1.Managed),
+		c.DSCNamespacedName,
+		testf.Transform(`.spec.components.%s.managementState = "%s"`, strings.ToLower(c.ComponentGVK.Kind), operatorv1.Managed),
 	).Eventually().Should(
-		jq.Match(`.spec.components.%s.managementState == "%s"`, strings.ToLower(c.GVK.Kind), operatorv1.Managed),
+		jq.Match(`.spec.components.%s.managementState == "%s"`, strings.ToLower(c.ComponentGVK.Kind), operatorv1.Managed),
 	)
 
-	g.List(c.GVK).Eventually().Should(
+	g.List(c.ComponentGVK).Eventually().Should(
 		HaveLen(1),
 	)
 	g.List(gvk.CustomResourceDefinition, crdSel).Eventually().Should(
@@ -265,12 +243,12 @@ func (c *ComponentTestCtx) ValidateComponentReleases(t *testing.T) {
 
 	g := c.NewWithT(t)
 
-	componentName := strings.ToLower(c.GVK.Kind)
+	componentName := strings.ToLower(c.ComponentGVK.Kind)
 
 	// Transform the DataScienceCluster to set the management state of the component
 	g.Update(
 		gvk.DataScienceCluster,
-		c.DSCName,
+		c.DSCNamespacedName,
 		testf.Transform(
 			`.spec.components.%s.managementState = "%s"`, componentName, operatorv1.Managed,
 		),
@@ -297,28 +275,6 @@ func (c *ComponentTestCtx) ValidateComponentReleases(t *testing.T) {
 			jq.Match(`.status.components.%s.releases[].repoUrl != ""`, componentName)),
 		),
 	))
-}
-
-func (c *ComponentTestCtx) GetDSC() (*dscv1.DataScienceCluster, error) {
-	obj := dscv1.DataScienceCluster{}
-
-	err := c.Client().Get(c.Context(), c.DSCName, &obj)
-	if err != nil {
-		return nil, err
-	}
-
-	return &obj, nil
-}
-
-func (c *ComponentTestCtx) GetDSCI() (*dsciv1.DSCInitialization, error) {
-	obj := dsciv1.DSCInitialization{}
-
-	err := c.Client().Get(c.Context(), c.DSCIName, &obj)
-	if err != nil {
-		return nil, err
-	}
-
-	return &obj, nil
 }
 
 func (c *ComponentTestCtx) GetClusterVersion() (semver.Version, error) {

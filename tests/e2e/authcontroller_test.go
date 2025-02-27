@@ -1,6 +1,7 @@
 package e2e_test
 
 import (
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -9,9 +10,7 @@ import (
 
 	serviceApi "github.com/opendatahub-io/opendatahub-operator/v2/apis/services/v1alpha1"
 	"github.com/opendatahub-io/opendatahub-operator/v2/controllers/components/dashboard"
-	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster/gvk"
-	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/resources"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/utils/test/matchers/jq"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/utils/test/testf"
 
@@ -80,17 +79,15 @@ func (tc *AuthControllerTestCtx) validateAuthCRDefaultContent(t *testing.T) {
 	t.Helper()
 
 	// Ensure AdminGroups is not empty.
-	tc.EnsureResourceConditionMet(tc.testAuthInstance, Not(BeEmpty()), "AdminGroups should not be empty")
+	tc.EnsureResourceConditionMet(
+		tc.testAuthInstance.Spec.AdminGroups,
+		Not(BeEmpty()),
+		"AdminGroups should not be empty",
+	)
 
 	// Validate that the first AdminGroup is as expected based on the Platform.
 	adminGroup := tc.testAuthInstance.Spec.AdminGroups[0]
-	var expectedAdminGroup string
-	if tc.Platform == cluster.SelfManagedRhoai || tc.Platform == cluster.ManagedRhoai {
-		expectedAdminGroup = "rhods-admins"
-	} else {
-		expectedAdminGroup = "odh-admins"
-	}
-
+	expectedAdminGroup := dashboard.GetAdminGroup()
 	tc.EnsureResourcesAreEqual(
 		adminGroup,
 		expectedAdminGroup,
@@ -103,7 +100,7 @@ func (tc *AuthControllerTestCtx) validateAuthCRDefaultContent(t *testing.T) {
 	tc.EnsureResourcesAreEqual(
 		allowedGroup,
 		expectedAllowedGroup,
-		"Expected '%s' as AdminGroup, but got: %v", expectedAdminGroup, adminGroup,
+		"Expected '%s' as AllowedGroup, but got: %v", expectedAdminGroup, adminGroup,
 	)
 }
 
@@ -167,7 +164,7 @@ func (tc *AuthControllerTestCtx) validateAddingGroups(t *testing.T) {
 
 	tc.EnsureResourceCreatedOrUpdated(
 		gvk.Auth,
-		resources.NamespacedNameFromObject(&tc.testAuthInstance),
+		client.ObjectKeyFromObject(&tc.testAuthInstance),
 		testf.Transform(
 			`.spec.adminGroups |= . + ["%s"] | .spec.allowedGroups |= . + ["%s"]`, testAdminGroup, testAllowedGroup,
 		),

@@ -13,6 +13,7 @@ type DeletionTestCtx struct {
 	*TestContext
 }
 
+// deletionTestSuite runs the deletion test suite.
 func deletionTestSuite(t *testing.T) {
 	t.Helper()
 
@@ -36,17 +37,17 @@ func deletionTestSuite(t *testing.T) {
 }
 
 // testDeletionExistDSC deletes the DataScienceCluster instance if it exists.
-func (tc *TestContext) testDeletionExistDSC(t *testing.T) {
+func (tc *DeletionTestCtx) testDeletionExistDSC(t *testing.T) {
 	t.Helper()
 
 	// Delete the DSC instance
-	tc.DeleteResource(gvk.DataScienceCluster, types.NamespacedName{Name: tc.TestDsc.Name, Namespace: tc.OperatorNamespace})
+	tc.DeleteResource(gvk.DataScienceCluster, types.NamespacedName{Name: tc.DSC.Name, Namespace: tc.OperatorNamespace})
 }
 
 // testDeletionExistDSCI deletes the DSCInitialization instance if it exists.
-func (tc *TestContext) testDeletionExistDSCI(t *testing.T) {
+func (tc *DeletionTestCtx) testDeletionExistDSCI(t *testing.T) {
 	t.Helper()
 
 	// Delete the DSCI instance
-	tc.DeleteResource(gvk.DSCInitialization, types.NamespacedName{Name: tc.TestDSCI.Name, Namespace: tc.OperatorNamespace})
+	tc.DeleteResource(gvk.DSCInitialization, types.NamespacedName{Name: tc.DSCI.Name, Namespace: tc.OperatorNamespace})
 }

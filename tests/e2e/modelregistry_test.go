@@ -29,7 +29,7 @@ type ModelRegistryTestCtx struct {
 func modelRegistryTestSuite(t *testing.T) {
 	t.Helper()
 
-	ct, err := NewComponentTestCtx(&componentApi.ModelRegistry{})
+	ct, err := NewComponentTestCtx(t, &componentApi.ModelRegistry{})
 	require.NoError(t, err)
 
 	componentCtx := ModelRegistryTestCtx{
@@ -52,13 +52,10 @@ func modelRegistryTestSuite(t *testing.T) {
 func (c *ModelRegistryTestCtx) validateSpec(t *testing.T) {
 	g := c.NewWithT(t)
 
-	dsc, err := c.GetDSC()
-	g.Expect(err).NotTo(HaveOccurred())
-
 	g.List(gvk.ModelRegistry).Eventually().Should(And(
 		HaveLen(1),
 		HaveEach(And(
-			jq.Match(`.spec.registriesNamespace == "%s"`, dsc.Spec.Components.ModelRegistry.RegistriesNamespace),
+			jq.Match(`.spec.registriesNamespace == "%s"`, c.DSC.Spec.Components.ModelRegistry.RegistriesNamespace),
 		)),
 	))
 }
@@ -111,7 +108,7 @@ func (c *ModelRegistryTestCtx) validateOperandsDynamicallyWatchedResources(t *te
 func (c *ModelRegistryTestCtx) validateModelRegistryCert(t *testing.T) {
 	g := c.NewWithT(t)
 
-	dsci, err := g.Get(gvk.DSCInitialization, c.DSCIName).Get()
+	dsci, err := g.Get(gvk.DSCInitialization, c.DSCINamespacedName).Get()
 	g.Expect(err).ShouldNot(HaveOccurred())
 
 	smns, err := jq.ExtractValue[string](dsci, ".spec.serviceMesh.controlPlane.namespace")

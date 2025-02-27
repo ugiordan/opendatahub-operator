@@ -29,7 +29,7 @@ import (
 func kserveTestSuite(t *testing.T) {
 	t.Helper()
 
-	ct, err := NewComponentTestCtx(&componentApi.Kserve{})
+	ct, err := NewComponentTestCtx(t, &componentApi.Kserve{})
 	require.NoError(t, err)
 
 	componentCtx := KserveTestCtx{
@@ -86,11 +86,7 @@ func (c *KserveTestCtx) setUpServerless(t *testing.T) error {
 	ft.SetName(c.ApplicationNamespace + "-serverless-serving-deployment")
 
 	if _, err := controllerutil.CreateOrUpdate(c.Context(), c.Client(), ft, func() error {
-		dsc, err := c.GetDSC()
-		if err != nil {
-			return err
-		}
-		if err := controllerutil.SetOwnerReference(dsc, ft, c.Client().Scheme()); err != nil {
+		if err := controllerutil.SetOwnerReference(c.DSC, ft, c.Client().Scheme()); err != nil {
 			return err
 		}
 		ft.Spec.Source.Name = xid.New().String()
@@ -106,17 +102,14 @@ func (c *KserveTestCtx) setUpServerless(t *testing.T) error {
 func (c *KserveTestCtx) validateSpec(t *testing.T) {
 	g := c.NewWithT(t)
 
-	dsc, err := c.GetDSC()
-	g.Expect(err).NotTo(HaveOccurred())
-
 	g.List(gvk.Kserve).Eventually().Should(And(
 		HaveLen(1),
 		HaveEach(And(
-			jq.Match(`.spec.defaultDeploymentMode == "%s"`, dsc.Spec.Components.Kserve.DefaultDeploymentMode),
-			jq.Match(`.spec.nim.managementState == "%s"`, dsc.Spec.Components.Kserve.NIM.ManagementState),
-			jq.Match(`.spec.serving.managementState == "%s"`, dsc.Spec.Components.Kserve.Serving.ManagementState),
-			jq.Match(`.spec.serving.name == "%s"`, dsc.Spec.Components.Kserve.Serving.Name),
-			jq.Match(`.spec.serving.ingressGateway.certificate.type == "%s"`, dsc.Spec.Components.Kserve.Serving.IngressGateway.Certificate.Type),
+			jq.Match(`.spec.defaultDeploymentMode == "%s"`, c.DSC.Spec.Components.Kserve.DefaultDeploymentMode),
+			jq.Match(`.spec.nim.managementState == "%s"`, c.DSC.Spec.Components.Kserve.NIM.ManagementState),
+			jq.Match(`.spec.serving.managementState == "%s"`, c.DSC.Spec.Components.Kserve.Serving.ManagementState),
+			jq.Match(`.spec.serving.name == "%s"`, c.DSC.Spec.Components.Kserve.Serving.Name),
+			jq.Match(`.spec.serving.ingressGateway.certificate.type == "%s"`, c.DSC.Spec.Components.Kserve.Serving.IngressGateway.Certificate.Type),
 		)),
 	))
 }
@@ -133,19 +126,16 @@ func (c *KserveTestCtx) validateFeatureTrackers(t *testing.T) {
 		jq.Match(`.metadata.ownerReferences[0].controller == true`),
 	))
 
-	dsc, err := c.GetDSC()
-	g.Expect(err).NotTo(HaveOccurred())
-
 	g.Update(
 		gvk.FeatureTracker,
 		ftName,
 		func(obj *unstructured.Unstructured) error {
-			if err := controllerutil.SetOwnerReference(dsc, obj, c.Client().Scheme()); err != nil {
+			if err := controllerutil.SetOwnerReference(c.DSC, obj, c.Client().Scheme()); err != nil {
 				return err
 			}
 
 			// trigger reconciliation as spec changes
-			if err = unstructured.SetNestedField(obj.Object, xid.New().String(), "spec", "source", "name"); err != nil {
+			if err := unstructured.SetNestedField(obj.Object, xid.New().String(), "spec", "source", "name"); err != nil {
 				return err
 			}
 
@@ -189,18 +179,12 @@ func (c *KserveTestCtx) validateDefaultCertsAvailable(t *testing.T) {
 	defaultIngressSecret, err := cluster.FindDefaultIngressSecret(g.Context(), g.Client())
 	g.Expect(err).ToNot(HaveOccurred())
 
-	dsc, err := c.GetDSC()
-	g.Expect(err).ToNot(HaveOccurred())
-
-	dsci, err := c.GetDSCI()
-	g.Expect(err).ToNot(HaveOccurred())
-
-	defaultSecretName := dsc.Spec.Components.Kserve.Serving.IngressGateway.Certificate.SecretName
+	defaultSecretName := c.DSC.Spec.Components.Kserve.Serving.IngressGateway.Certificate.SecretName
 	if defaultSecretName == "" {
 		defaultSecretName = serverless.DefaultCertificateSecretName
 	}
 
-	ctrlPlaneSecret, err := cluster.GetSecret(g.Context(), g.Client(), dsci.Spec.ServiceMesh.ControlPlane.Namespace, defaultSecretName)
+	ctrlPlaneSecret, err := cluster.GetSecret(g.Context(), g.Client(), c.DSCI.Spec.ServiceMesh.ControlPlane.Namespace, defaultSecretName)
 	g.Expect(err).ToNot(HaveOccurred())
 
 	g.Expect(ctrlPlaneSecret.Type).Should(Equal(defaultIngressSecret.Type))

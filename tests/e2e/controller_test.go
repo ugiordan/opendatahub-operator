@@ -3,7 +3,9 @@ package e2e_test
 import (
 	"flag"
 	"fmt"
+	"k8s.io/apimachinery/pkg/types"
 	"os"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"slices"
 	"strings"
 	"testing"
@@ -89,23 +91,36 @@ type testContextConfig struct {
 	services               arrayFlags
 }
 
-// Holds information specific to individual tests.
+// TestContext holds information specific to individual tests.
 type TestContext struct {
-	// Test context
+	// Embeds the common test context.
 	*testf.TestContext
-	// Shared Gomega test wrapper
+
+	// Shared Gomega test wrapper.
 	g *testf.WithT
-	// namespace of the operator
+
+	// Namespace of the operator.
 	OperatorNamespace string
-	// namespace of the deployed applications
+
+	// Namespace of the deployed applications.
 	ApplicationNamespace string
-	// test DataScienceCluster instance
-	TestDsc *dscv1.DataScienceCluster
-	// test DSCI CR because we do not create it in ODH by default
-	TestDSCI *dsciv1.DSCInitialization
-	// test Platform
+
+	// Test DataScienceCluster instance.
+	DSC *dscv1.DataScienceCluster
+
+	// Namespaced name of the test DataScienceCluster instance.
+	DSCNamespacedName types.NamespacedName
+
+	// Test DSCInitialization CR instance (not created by default in ODH).
+	DSCI *dsciv1.DSCInitialization
+
+	// Namespaced name of the test DSCInitialization CR instance.
+	DSCINamespacedName types.NamespacedName
+
+	// Test platform.
 	Platform common.Platform
-	// test configuration
+
+	// Test configuration options.
 	TestOpts testContextConfig
 }
 
@@ -135,8 +150,10 @@ func NewTestContext(t *testing.T) (*TestContext, error) { //nolint:thelper
 		g:                    tcf.NewWithT(t),
 		OperatorNamespace:    testOpts.operatorNamespace,
 		ApplicationNamespace: testDSCI.Spec.ApplicationsNamespace,
-		TestDsc:              testDSC,
-		TestDSCI:             testDSCI,
+		DSC:                  testDSC,
+		DSCNamespacedName:    client.ObjectKeyFromObject(testDSCI),
+		DSCI:                 testDSCI,
+		DSCINamespacedName:   client.ObjectKeyFromObject(testDSCI),
 		Platform:             release.Name,
 		TestOpts:             testOpts,
 	}, nil

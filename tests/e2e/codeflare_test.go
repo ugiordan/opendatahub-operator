@@ -11,7 +11,7 @@ import (
 func codeflareTestSuite(t *testing.T) {
 	t.Helper()
 
-	ct, err := NewComponentTestCtx(&componentApi.CodeFlare{})
+	ct, err := NewComponentTestCtx(t, &componentApi.CodeFlare{})
 	require.NoError(t, err)
 
 	componentCtx := CodeFlareTestCtx{

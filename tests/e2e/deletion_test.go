@@ -1,6 +1,7 @@
 package e2e_test
 
 import (
+	"k8s.io/apimachinery/pkg/types"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -39,7 +40,7 @@ func (tc *TestContext) testDeletionExistDSC(t *testing.T) {
 	t.Helper()
 
 	// Delete the DSC instance
-	tc.DeleteResource(gvk.DataScienceCluster, tc.TestDsc.Name)
+	tc.DeleteResource(gvk.DataScienceCluster, types.NamespacedName{Name: tc.TestDsc.Name, Namespace: tc.OperatorNamespace})
 }
 
 // testDeletionExistDSCI deletes the DSCInitialization instance if it exists.
@@ -47,5 +48,5 @@ func (tc *TestContext) testDeletionExistDSCI(t *testing.T) {
 	t.Helper()
 
 	// Delete the DSCI instance
-	tc.DeleteResource(gvk.DSCInitialization, tc.TestDSCI.Name)
+	tc.DeleteResource(gvk.DSCInitialization, types.NamespacedName{Name: tc.TestDSCI.Name, Namespace: tc.OperatorNamespace})
 }

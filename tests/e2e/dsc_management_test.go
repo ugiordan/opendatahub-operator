@@ -2,6 +2,9 @@ package e2e_test
 
 import (
 	"fmt"
+	gomegaTypes "github.com/onsi/gomega/types"
+	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/resources"
+	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/utils/test/testf"
 	"testing"
 
 	operatorv1 "github.com/openshift/api/operator/v1"
@@ -44,10 +47,10 @@ func dscManagementTestSuite(t *testing.T) {
 	testCases := []testCase{
 		{"Ensure Service Mesh and Serverless operators are installed", dscTestCtx.validateOperatorsInstallation},
 		{"Validate creation of DSCInitialization instance", dscTestCtx.validateDSCICreation},
-		{"Validate ServiceMeshSpec in DSCInitialization instance", dscTestCtx.validateServiceMeshSpecInDSCI},
-		{"Validate owned namespaces exist", dscTestCtx.validateOwnedNamespacesAllExist},
 		{"Validate creation of DataScienceCluster instance", dscTestCtx.validateDSCCreation},
+		{"Validate ServiceMeshSpec in DSCInitialization instance", dscTestCtx.validateServiceMeshSpecInDSCI},
 		{"Validate Knative resource", dscTestCtx.validateKnativeSpecInDSC},
+		{"Validate owned namespaces exist", dscTestCtx.validateOwnedNamespacesAllExist},
 	}
 
 	// Append webhook-specific tests
@@ -70,7 +73,7 @@ func (tc *DSCTestCtx) validateOperatorsInstallation(t *testing.T) {
 	// Define operators to be installed.
 	operators := []types.NamespacedName{
 		{Name: serviceMeshOpName, Namespace: openshiftOperatorsNamespace},
-		{Name: serverlessOpName, Namespace: openshiftOperatorsNamespace},
+		{Name: serverlessOpName, Namespace: serverlessOperatorNamespace},
 	}
 
 	// Create test cases.
@@ -93,7 +96,7 @@ func (tc *DSCTestCtx) validateOperatorsInstallation(t *testing.T) {
 func (tc *DSCTestCtx) validateDSCICreation(t *testing.T) {
 	t.Helper()
 
-	tc.EnsureResourceExistsOrCreate(
+	tc.EnsureResourceCreatedOrUpdated(
 		gvk.DSCInitialization,
 		types.NamespacedName{Namespace: tc.TestDSCI.Namespace, Name: tc.TestDSCI.Name},
 		NoOpMutationFn,
@@ -105,9 +108,9 @@ func (tc *DSCTestCtx) validateDSCICreation(t *testing.T) {
 func (tc *DSCTestCtx) validateDSCCreation(t *testing.T) {
 	t.Helper()
 
-	tc.EnsureResourceExistsOrCreate(
+	tc.EnsureResourceCreatedOrUpdated(
 		gvk.DataScienceCluster,
-		types.NamespacedName{Namespace: tc.TestDSCI.Namespace, Name: tc.TestDSCI.Name},
+		types.NamespacedName{Namespace: tc.TestDsc.Namespace, Name: tc.TestDsc.Name},
 		NoOpMutationFn,
 		"Failed to create DSC resource %s", tc.TestDsc.Name,
 	)
@@ -186,7 +189,7 @@ func (tc *DSCTestCtx) validateOwnedNamespacesAllExist(t *testing.T) {
 func (tc *DSCTestCtx) validateDSCIDuplication(t *testing.T) {
 	t.Helper()
 
-	dup := createDSCI(dsciInstanceNameDuplicate)
+	dup := CreateDSCI(dsciInstanceNameDuplicate)
 
 	// assert that a duplicate DSCI Initialization cannot be created.
 	tc.EnsureResourceIsUnique(dup, "Error validating DSCI duplication")
@@ -196,7 +199,7 @@ func (tc *DSCTestCtx) validateDSCIDuplication(t *testing.T) {
 func (tc *DSCTestCtx) validateDSCDuplication(t *testing.T) {
 	t.Helper()
 
-	dup := createDSC(dscInstanceNameDuplicate)
+	dup := CreateDSC(dscInstanceNameDuplicate)
 
 	// assert that a duplicate DSC Initialization cannot be created.
 	tc.EnsureResourceIsUnique(dup, "Error validating DSC duplication")
@@ -206,36 +209,21 @@ func (tc *DSCTestCtx) validateDSCDuplication(t *testing.T) {
 func (tc *DSCTestCtx) validateModelRegistryConfig(t *testing.T) {
 	t.Helper()
 
-	// Skip validation if the ModelRegistry is managed.
+	// Check if the ModelRegistry is managed
 	if tc.TestDsc.Spec.Components.ModelRegistry.ManagementState == operatorv1.Managed {
-		// Ensure changing registriesNamespace is not allowed.
-		tc.g.Expect(
-			tc.UpdateRegistriesNamespace(
-				testNamespace,
-				modelregistryctrl.DefaultModelRegistriesNamespace,
-				true,
-			),
-		).To(HaveOccurred(), "Expected failure when attempting to change registriesNamespace while in Managed state.")
+		// Ensure changing registriesNamespace is not allowed and expect failure
+		tc.UpdateRegistriesNamespace(testNamespace, modelregistryctrl.DefaultModelRegistriesNamespace, true)
 
+		// No further checks if it's managed
 		return
 	}
 
 	// Ensure setting registriesNamespace to a non-default value is allowed.
-	tc.g.Expect(
-		tc.UpdateRegistriesNamespace(
-			testNamespace,
-			testNamespace,
-			false,
-		)).
-		To(Succeed(), "Failed to set registriesNamespace to a non-default value.")
+	// No error is expected, and we check the value of the patch after it's successful
+	tc.UpdateRegistriesNamespace(testNamespace, testNamespace, false)
 
 	// Ensure resetting registriesNamespace to the default value is allowed.
-	tc.g.Expect(
-		tc.UpdateRegistriesNamespace(
-			modelregistryctrl.DefaultModelRegistriesNamespace,
-			modelregistryctrl.DefaultModelRegistriesNamespace,
-			false),
-	).To(Succeed(), "Failed to reset registriesNamespace to the default value.")
+	tc.UpdateRegistriesNamespace(modelregistryctrl.DefaultModelRegistriesNamespace, modelregistryctrl.DefaultModelRegistriesNamespace, false)
 }
 
 // UpdateRegistriesNamespace updates the ModelRegistry component's `RegistriesNamespace` field
@@ -254,24 +242,32 @@ func (tc *DSCTestCtx) validateModelRegistryConfig(t *testing.T) {
 //
 //	err := tc.UpdateRegistriesNamespace("custom-namespace", "custom-namespace", false)
 //	tc.g.Expect(err).ToNot(HaveOccurred())
-func (tc *DSCTestCtx) UpdateRegistriesNamespace(newNamespace, expectedValue string, shouldFail bool) error {
-	// Construct the JSON patch to update the registriesNamespace field.
-	patchData := fmt.Sprintf(`{"spec":{"components":{"modelregistry":{"registriesNamespace":"%s"}}}}`, newNamespace)
-
-	// Apply the patch.
-	err := tc.Client().Patch(tc.Context(), tc.TestDsc, client.RawPatch(types.MergePatchType, []byte(patchData)))
-
-	// Validate the patching outcome.
+func (tc *DSCTestCtx) UpdateRegistriesNamespace(newNamespace, expectedValue string, shouldFail bool) {
+	// Define the expected condition based on the shouldFail flag
+	var condition gomegaTypes.GomegaMatcher
 	if shouldFail {
-		tc.g.Expect(err).To(HaveOccurred(), "Expected an error while setting RegistriesNamespace in DSC %s to %s, but no error occurred.", tc.TestDsc.Name, newNamespace)
-		return err
+		// If shouldFail is true, we expect the patch to fail
+		condition = Not(Succeed())
+	} else {
+		// If shouldFail is false, we expect the patch to succeed
+		condition = Succeed()
 	}
 
-	tc.g.Expect(err).ToNot(HaveOccurred(), "Unexpected error when setting RegistriesNamespace in DSC %s to %s: %v", tc.TestDsc.Name, newNamespace, err)
+	// Update the registriesNamespace field.
+	tc.EnsureResourceCreatedOrPatchedWithCondition(
+		gvk.Auth,
+		resources.NamespacedNameFromObject(tc.TestDsc),
+		testf.Transform(`.spec.components[].modelregistry.registriesNamespace |= "%s"`, newNamespace),
+		condition,
+		"Failed to update RegistriesNamespace to %s, expected %s", newNamespace, expectedValue,
+	)
 
-	// Verify the `RegistriesNamespace` field matches the expected value.
-	tc.g.Expect(tc.TestDsc.Spec.Components.ModelRegistry.RegistriesNamespace).To(Equal(expectedValue),
-		"Expected RegistriesNamespace to be %s, but got %s", expectedValue, tc.TestDsc.Spec.Components.ModelRegistry.RegistriesNamespace)
+	// If patching succeeded and should not fail, verify the RegistriesNamespace value
+	if !shouldFail {
+		tc.EnsureResourcesAreEqual(
+			tc.TestDsc.Spec.Components.ModelRegistry.RegistriesNamespace,
+			expectedValue,
+			"Expected RegistriesNamespace to be %s, but got %s", expectedValue, tc.TestDsc.Spec.Components.ModelRegistry.RegistriesNamespace)
 
-	return nil
+	}
 }

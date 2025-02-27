@@ -19,6 +19,7 @@ import (
 // CfgMapDeletionTestCtx holds the context for the config map deletion tests.
 type CfgMapDeletionTestCtx struct {
 	*TestContext
+	configMapNamespacedName types.NamespacedName
 }
 
 // cfgMapDeletionTestSuite handles the main testing flow for DSC deletion logic via ConfigMap.
@@ -31,7 +32,8 @@ func cfgMapDeletionTestSuite(t *testing.T) {
 
 	// Create an instance of test context.
 	cfgMapDeletionTestCtx := CfgMapDeletionTestCtx{
-		TestContext: tc,
+		TestContext:             tc,
+		configMapNamespacedName: types.NamespacedName{Name: deleteConfigMap, Namespace: tc.OperatorNamespace},
 	}
 
 	// Ensuring ConfigMap cleanup after tests
@@ -55,13 +57,12 @@ func (tc *CfgMapDeletionTestCtx) validateDSCDeletionUsingConfigMap(t *testing.T)
 	enableDeletion := "false"
 	tc.g.CreateOrUpdate(
 		gvk.ConfigMap,
-		types.NamespacedName{Name: deleteConfigMap, Namespace: tc.OperatorNamespace},
+		tc.configMapNamespacedName,
 		testf.Transform(`.metadata.labels[%s] = %s`, upgrade.DeleteConfigMapLabel, enableDeletion)).
 		Eventually().ShouldNot(BeNil(), "Failed to create or update deletion config map")
 
 	// Verify the existence of the DSC instance.
-	dsc := tc.EnsureResourceExists(gvk.DataScienceCluster, types.NamespacedName{Name: tc.TestDsc.Name})
-	tc.EnsureResourceNotNil(dsc, "Expected DSC instance %s not found", tc.TestDsc.Name)
+	tc.EnsureResourceExists(gvk.DataScienceCluster, types.NamespacedName{Name: tc.TestDsc.Name})
 }
 
 // validateOwnedNamespacesAllExist verifies that the owned namespaces exist.
@@ -84,7 +85,7 @@ func (tc *CfgMapDeletionTestCtx) removeDeletionConfigMap(t *testing.T) {
 	// Delete the config map
 	tc.DeleteResource(
 		gvk.ConfigMap,
-		deleteConfigMap,
+		tc.configMapNamespacedName,
 		client.PropagationPolicy(metav1.DeletePropagationForeground),
 	)
 }

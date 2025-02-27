@@ -2,21 +2,18 @@ package e2e_test
 
 import (
 	"fmt"
-	gomegaTypes "github.com/onsi/gomega/types"
-	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/utils/test/testf"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/onsi/gomega/gstruct"
+	gomegaTypes "github.com/onsi/gomega/types"
 	operatorv1 "github.com/openshift/api/operator/v1"
 	ofapi "github.com/operator-framework/api/pkg/operators/v1alpha1"
-	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -34,6 +31,7 @@ import (
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster/gvk"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/metadata/labels"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/resources"
+	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/utils/test/testf"
 
 	. "github.com/onsi/gomega"
 )
@@ -48,7 +46,7 @@ const (
 	applicationNamespace        = "opendatahub"          // Namespace for the DSCI applications
 	knativeServingNamespace     = "knative-serving"      // Namespace for Knative Serving components
 	openshiftOperatorsNamespace = "openshift-operators"  // Namespace for OpenShift Operators
-	serverlessNamespace         = "openshift-serverless" // Namespace for the Serverless Operator
+	serverlessOperatorNamespace = "openshift-serverless" // Namespace for the Serverless Operator
 
 	// Service Mesh Constants.
 	serviceMeshOpName            = "servicemeshoperator" // Name of the Service Mesh Operator
@@ -163,19 +161,19 @@ func (tc *TestContext) EnsureResourceExistsOrNil(
 	}
 
 	// Attempt to get the resource with retries
-	var obj *unstructured.Unstructured
+	var u *unstructured.Unstructured
 	var err error
 	tc.g.Eventually(func() error {
-		obj, err = tc.g.Get(gvk, nn).Get() // Fetch the resource
+		u, err = tc.g.Get(gvk, nn).Get() // Fetch the resource
 		if errors.IsNotFound(err) {
 			// Return nil if resource not found
 			return nil
 		}
 		return err // Return any other error
-	}).Should(Succeed(), args)
+	}).Should(Succeed(), args...)
 
 	// Return the resource or nil if it wasn't found
-	return obj
+	return u
 }
 
 // EnsureResourceExists verifies whether a specific Kubernetes resource exists by checking its presence in the cluster.
@@ -198,29 +196,6 @@ func (tc *TestContext) EnsureResourceExists(
 	nn types.NamespacedName,
 	args ...any,
 ) *unstructured.Unstructured {
-	return tc.EnsureResourceExistsAndMatchesCondition(gvk, nn, true, BeNil(), args...)
-}
-
-// EnsureResourceExistsAndMatchesCondition ensures that the resource exists and matches the given condition.
-// It fetches the resource and asserts that it satisfies the specified condition.
-//
-// Parameters:
-//   - gvk (schema.GroupVersionKind): The GroupVersionKind of the resource being checked.
-//   - nn (types.NamespacedName): The namespace and name of the resource (used for filtering).
-//   - shouldNot (bool): If true, the condition should **not** be satisfied; otherwise, it should.
-//   - condition (GomegaMatcher): The Gomega matcher for the condition that the resource should satisfy (e.g., BeNil, BeEmpty, HaveLen).
-//   - args (...interface{}): Optional Gomega assertion message arguments. If not provided, a default message is used.
-//
-// Example Usage:
-//
-//	tc.EnsureResourceExistsAndMatchesCondition(gvk, nn, BeEmpty(), false, "default/my-deployment", "Deployment")
-func (tc *TestContext) EnsureResourceExistsAndMatchesCondition(
-	gvk schema.GroupVersionKind,
-	nn types.NamespacedName,
-	shouldNot bool,
-	condition gomegaTypes.GomegaMatcher,
-	args ...any,
-) *unstructured.Unstructured {
 	// Construct a resource identifier.
 	resourceID := resources.FormatNamespacedName(nn)
 
@@ -229,20 +204,40 @@ func (tc *TestContext) EnsureResourceExistsAndMatchesCondition(
 		args = append(args, "Expected resource '%s' of kind '%s' to exist, but it was not found.", resourceID, gvk.Kind)
 	}
 
-	// Ensure the resource exists by using EnsureResourceExistsOrNil
-	obj := tc.EnsureResourceExistsOrNil(gvk, nn, args...)
+	// Use EnsureResourceExistsOrNil to attempt to fetch the resource with retries
+	u := tc.EnsureResourceExistsOrNil(gvk, nn, args...)
 
 	// Ensure that the resource object is not nil
-	tc.g.Expect(obj).ShouldNot(BeNil(), args...)
+	tc.g.Expect(u).ShouldNot(BeNil(), args...)
+
+	return u
+}
+
+// EnsureResourceExistsAndMatchesCondition ensures that the resource exists and matches the given condition.
+// Callers should explicitly use `Not(matcher)` if they need to assert a negative condition.
+//
+// Parameters:
+//   - gvk (schema.GroupVersionKind): The GroupVersionKind of the resource being checked.
+//   - nn (types.NamespacedName): The namespace and name of the resource (used for filtering).
+//   - matcher: A Gomega matcher specifying the expected condition (e.g., BeEmpty(), Not(BeEmpty())).
+//   - args (...interface{}): Optional Gomega assertion message arguments. If not provided, a default message is used.
+//
+// Example Usage:
+//
+//	tc.EnsureResourceExistsAndMatchesCondition(gvk, nn, Not(BeEmpty()) "Deployment %s should not be empty", "default/my-deployment")
+func (tc *TestContext) EnsureResourceExistsAndMatchesCondition(
+	gvk schema.GroupVersionKind,
+	nn types.NamespacedName,
+	condition gomegaTypes.GomegaMatcher,
+	args ...any,
+) *unstructured.Unstructured {
+	// Ensure the resource exists by using EnsureResourceExists
+	u := tc.EnsureResourceExists(gvk, nn, args...)
 
 	// Validate the condition on the resource
-	if shouldNot {
-		tc.g.Expect(obj).ShouldNot(condition, args...)
-	} else {
-		tc.g.Expect(obj).Should(condition, args...)
-	}
+	tc.g.Expect(u).To(condition, args...)
 
-	return obj
+	return u
 }
 
 // EnsureResourcesExist verifies whether a list of specific Kubernetes resources exists in the cluster.
@@ -289,129 +284,21 @@ func (tc *TestContext) EnsureResourcesExist(
 	return resourcesList
 }
 
-// EnsureResourceExistsOrCreate ensures that the specified Kubernetes resource exists.
-// If the resource is missing, it will attempt to create it; if it already exists, no action is taken.
-//
-// This function first checks for the resource's existence using its name and namespace. If the resource is not found,
-// it will attempt to create it using the provided transformation function, and then verify its presence.
-//
-// Parameters:
-//   - gvk (schema.GroupVersionKind): The GroupVersionKind of the resource being ensured.
-//   - nn (types.NamespacedName): The namespace and name of the resource to check or create.
-//   - fn (func): A transformation function that will be applied to the resource before creation. It modifies the resource in place (e.g., setting the spec).
-//   - args (...any): Optional Gomega assertion message arguments. If none are provided, a default message is used.
-//
-// Returns:
-//   - *unstructured.Unstructured: The resource object if it exists or is successfully created.
-//
-// Example Usage:
-//
-//	tc.EnsureResourceExistsOrCreate(
-//	    schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
-//	    types.NamespacedName{Name: "my-deployment", Namespace: "default"},
-//	    transformSpecFunction,
-//	)
-func (tc *TestContext) EnsureResourceExistsOrCreate(
-	gvk schema.GroupVersionKind,
-	nn types.NamespacedName,
-	fn func(obj *unstructured.Unstructured) error,
-	args ...any,
-) *unstructured.Unstructured {
-	// Construct a resource identifier.
-	resourceID := resources.FormatNamespacedName(nn)
-
-	// Default error message if no arguments are provided
-	if len(args) == 0 {
-		args = append(args, "Expected resource '%s' of kind '%s' to exist, but it was not found and could not be created.", resourceID, gvk.Kind)
-	}
-
-	// Ensure that the resource exists, retrying if necessary
-	existingResource := tc.EnsureResourceExistsOrNil(gvk, nn)
-
-	// If the resource doesn't exist, create it
-	if existingResource == nil {
-		// Create the resource using CreateOrUpdate
-		tc.g.CreateOrUpdate(gvk, nn, fn).
-			Eventually().
-			Should(Succeed(), "Failed to create resource '%s' of kind '%s'", resourceID, gvk.Kind)
-
-		// Verify the object exists after creation
-		return tc.EnsureResourceExists(gvk, nn, args...)
-	}
-
-	// Resource exists, return the existing resource
-	return existingResource
-}
-
-// EnsureResourceExistsOrUpdate ensures that a given Kubernetes resource exists.
-// If the resource is missing, it will be created; if it already exists, it will be updated
-// using the provided mutation function.
-//
-// This function internally uses `CreateOrUpdate` to guarantee that the resource is present
-// in the cluster with the desired state.
-//
-// Parameters:
-//   - gvk (schema.GroupVersionKind): The GroupVersionKind of the resource being created or updated.
-//   - nn (types.NamespacedName): The namespace and name of the resource.
-//   - fn (func(*unstructured.Unstructured) error): A function to modify the resource before applying it.
-//   - args (...interface{}): Optional Gomega assertion message arguments. If none are provided, a default message is used.
-//
-// Returns:
-//   - *unstructured.Unstructured: The existing or newly created (updated) resource object.
-//
-// Example Usage:
-//
-//	tc.EnsureResourceExistsOrUpdate(g, schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
-//	    types.NamespacedName{Name: "my-deployment", Namespace: "default"},
-//	    func(obj *unstructured.Unstructured) error {
-//	        obj.SetLabels(map[string]string{"app": "my-app"})
-//	        return nil
-//	    })
-func (tc *TestContext) EnsureResourceExistsOrUpdate(
-	gvk schema.GroupVersionKind,
-	nn types.NamespacedName,
-	fn func(obj *unstructured.Unstructured) error,
-	args ...any,
-) *unstructured.Unstructured {
-	// Construct a resource identifier.
-	resourceID := resources.FormatNamespacedName(nn)
-
-	// default error message if no arguments are provided
-	if len(args) == 0 {
-		args = append(args, "Expected resource '%s' of kind '%s' to exist, but it was not found.", resourceID, gvk.Kind)
-	}
-
-	// Use Eventually to retry getting the resource until it appears
-	var obj *unstructured.Unstructured
-	var err error
-	tc.g.Eventually(func() error {
-		obj, err = tc.g.CreateOrUpdate(gvk, nn, fn).Get() // Fetch the resource
-		return err
-	}).Should(
-		Succeed(),
-		"Error occurred while fetching the resource '%s' of kind '%s': %v", resourceID, gvk.Kind, err,
-	)
-
-	// Ensure that the resource object is not nil
-	tc.g.Expect(obj).ShouldNot(BeNil(), args...)
-
-	return obj
-}
-
 // EnsureExactlyOneResourceExists verifies that exactly one instance of a specific Kubernetes resource
-// exists by listing the resources in the cluster. If there are none or more than one, it will fail the test.
+// exists in the cluster. If there are none or more than one, it fails the test.
 //
 // Parameters:
 //   - gvk (schema.GroupVersionKind): The GroupVersionKind of the resource being checked.
-//   - nn (types.NamespacedName): The namespace and name of the resource (in this case, used for filtering).
-//   - args (...interface{}): Optional Gomega assertion message arguments. If none are provided, a default message is used.
+//   - nn (types.NamespacedName): The namespace and name of the resource (used for filtering).
+//   - args (...interface{}): Optional Gomega assertion message arguments. Defaults to a standard error message.
 //
 // Returns:
-//   - *unstructured.Unstructured: The resource object if exactly one exists.
+//   - *unstructured.Unstructured: The resource object if exactly one instance exists.
 //
 // Example Usage:
 //
-//	tc.EnsureExactlyOneResourceExists(g, schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
+//	tc.EnsureExactlyOneResourceExists(g,
+//	    schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
 //	    types.NamespacedName{Name: "my-deployment", Namespace: "default"})
 func (tc *TestContext) EnsureExactlyOneResourceExists(
 	gvk schema.GroupVersionKind,
@@ -450,13 +337,13 @@ func (tc *TestContext) EnsureExactlyOneResourceExists(
 	return &objList[0]
 }
 
-// EnsureResourcesWithLabelsExist verifies that a specified number of resources with the provided labels exist in the cluster.
+// EnsureResourcesWithLabelsExist verifies that a minimum number of resources with specific labels exist in the cluster.
 //
 // Parameters:
-//   - gvk (schema.GroupVersionKind): The GroupVersionKind of the resource being checked.
-//   - matchingLabels (client.MatchingLabels): A label selector to filter the resources.
-//   - minCount (int): The minimum number of resources expected to match the label selector.
-//   - args (...interface{}): Optional Gomega assertion message arguments. If none are provided, a default message is used.
+//   - gvk (schema.GroupVersionKind): The GroupVersionKind of the resources being checked.
+//   - matchingLabels (client.MatchingLabels): The label selector to filter the resources.
+//   - minCount (int): The minimum number of matching resources expected.
+//   - args (...interface{}): Optional Gomega assertion message arguments.
 //
 // Example Usage:
 //
@@ -482,17 +369,165 @@ func (tc *TestContext) EnsureResourcesWithLabelsExist(
 	)
 }
 
+// EnsureResourceCreatedOrUpdated ensures that a given Kubernetes resource exists.
+// If the resource is missing, it will be created; if it already exists, it will be updated
+// using the provided mutation function.
+//
+// This function internally uses `CreateOrUpdate` to guarantee that the resource is present
+// in the cluster with the desired state.
+//
+// Parameters:
+//   - gvk (schema.GroupVersionKind): The GroupVersionKind of the resource being created or updated.
+//   - nn (types.NamespacedName): The namespace and name of the resource.
+//   - fn (func(*unstructured.Unstructured) error): A function to modify the resource before applying it.
+//   - args (...interface{}): Optional Gomega assertion message arguments. If none are provided, a default message is used.
+//
+// Returns:
+//   - *unstructured.Unstructured: The existing or newly created (updated) resource object.
+//
+// Example Usage:
+//
+//	tc.EnsureResourceCreatedOrUpdated(g, schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
+//	    types.NamespacedName{Name: "my-deployment", Namespace: "default"},
+//	    func(obj *unstructured.Unstructured) error {
+//	        obj.SetLabels(map[string]string{"app": "my-app"})
+//	        return nil
+//	    })
+func (tc *TestContext) EnsureResourceCreatedOrUpdated(
+	gvk schema.GroupVersionKind,
+	nn types.NamespacedName,
+	fn func(obj *unstructured.Unstructured) error,
+	args ...any,
+) *unstructured.Unstructured {
+	// Construct a resource identifier.
+	resourceID := resources.FormatNamespacedName(nn)
+
+	// default error message if no arguments are provided
+	if len(args) == 0 {
+		args = append(args, "Expected resource '%s' of kind '%s' to be created or updated, but an issue occurred.", resourceID, gvk.Kind)
+	}
+
+	// Use Eventually to retry getting the resource until it appears
+	var u *unstructured.Unstructured
+	var err error
+	tc.g.Eventually(func() error {
+		u, err = tc.g.CreateOrUpdate(gvk, nn, fn).Get() // Fetch the resource
+		return err
+	}).Should(
+		Succeed(),
+		"Failed to create or update resource '%s' of kind '%s': %v", resourceID, gvk.Kind, err,
+	)
+
+	// Ensure that the resource object is not nil
+	tc.g.Expect(u).ShouldNot(BeNil(), args...)
+
+	return u
+}
+
+// EnsureResourceCreatedOrPatched ensures that a given Kubernetes resource exists.
+// If the resource is missing, it will be created; if it already exists, it will be patched
+// using the provided mutation function.
+//
+// This function internally uses `CreateOrPatch` to ensure that the resource is present
+// in the cluster with the desired state.
+//
+// Parameters:
+//   - gvk (schema.GroupVersionKind): The GroupVersionKind of the resource being created or patched.
+//   - nn (types.NamespacedName): The namespace and name of the resource.
+//   - fn (func(*unstructured.Unstructured) error): A function to modify the resource before applying it.
+//   - args (...interface{}): Optional Gomega assertion message arguments. Defaults to a standard error message.
+//
+// Returns:
+//   - *unstructured.Unstructured: The existing or newly created (patched) resource object.
+//
+// Example Usage:
+//
+//	tc.EnsureResourceCreatedOrPatched(
+//	    schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
+//	    types.NamespacedName{Name: "my-deployment", Namespace: "default"},
+//	    func(obj *unstructured.Unstructured) error {
+//	        obj.SetLabels(map[string]string{"app": "my-app"})
+//	        return nil
+//	    })
+func (tc *TestContext) EnsureResourceCreatedOrPatched(
+	gvk schema.GroupVersionKind,
+	nn types.NamespacedName,
+	fn func(obj *unstructured.Unstructured) error,
+	args ...any,
+) *unstructured.Unstructured {
+	return tc.EnsureResourceCreatedOrPatchedWithCondition(gvk, nn, fn, Succeed(), args)
+}
+
+// EnsureResourceCreatedOrPatchedWithCondition ensures that a given Kubernetes resource exists
+// and that it matches the specified condition. If the resource is missing, it will be created;
+// if it already exists, it will be patched using the provided mutation function.
+//
+// This function uses `CreateOrPatch` to ensure that the resource is present in the cluster with the
+// desired state, then verifies that the resource matches the provided condition by using Gomega's `Eventually`.
+//
+// Parameters:
+//   - gvk (schema.GroupVersionKind): The GroupVersionKind of the resource being created or patched.
+//   - nn (types.NamespacedName): The namespace and name of the resource.
+//   - fn (func(*unstructured.Unstructured) error): A function to modify the resource before applying it.
+//   - condition (gomegaTypes.GomegaMatcher): The Gomega matcher condition to assert on the resource after it is created or patched.
+//   - args (...interface{}): Optional Gomega assertion message arguments. Defaults to a standard error message.
+//
+// Returns:
+//   - *unstructured.Unstructured: The existing or newly created (patched) resource object.
+//
+// Example Usage:
+//
+//	tc.EnsureResourceCreatedOrPatchedWithCondition(
+//	    schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
+//	    types.NamespacedName{Name: "my-deployment", Namespace: "default"},
+//	    func(obj *unstructured.Unstructured) error {
+//	        obj.SetLabels(map[string]string{"app": "my-app"})
+//	        return nil
+//	    },
+//	    BeTrue(),
+//	    "Deployment should have the correct labels")
+func (tc *TestContext) EnsureResourceCreatedOrPatchedWithCondition(
+	gvk schema.GroupVersionKind,
+	nn types.NamespacedName,
+	fn func(obj *unstructured.Unstructured) error,
+	condition gomegaTypes.GomegaMatcher,
+	args ...any,
+) *unstructured.Unstructured {
+	// Construct a resource identifier.
+	resourceID := resources.FormatNamespacedName(nn)
+
+	// default error message if no arguments are provided
+	if len(args) == 0 {
+		args = append(args, "Expected resource '%s' of kind '%s' to be created or patched, but an issue occurred.", resourceID, gvk.Kind)
+	}
+
+	// Use Eventually to retry getting the resource until it appears
+	var u *unstructured.Unstructured
+	var err error
+	tc.g.Eventually(func() error {
+		u, err = tc.g.CreateOrPatch(gvk, nn, fn).Get() // Fetch the resource
+		return err
+	}).Should(
+		condition,
+		"Failed to create or patch resource '%s' of kind '%s': %v", resourceID, gvk.Kind, err,
+	)
+
+	// Ensure that the resource object is not nil
+	tc.g.Expect(u).ShouldNot(BeNil(), args...)
+
+	return u
+}
+
 // EnsureSubscriptionExistsOrCreate ensures that the specified Subscription exists.
 // If the Subscription is missing, it will be created; if it already exists, no action is taken.
-// This function reuses the `EnsureResourceExistsOrCreate` logic to guarantee that the Subscription
+// This function reuses the `EnsureResourceCreatedOrUpdated` logic to guarantee that the Subscription
 // exists or is created.
 //
 // Parameters:
-//   - name (string): The name of the Subscription.
-//   - ns (string): The namespace where the Subscription is expected to exist.
+//   - nn (types.NamespacedName): The namespace and name of the Subscription.
 //
 // Returns:
-//   - *unstructured.Unstructured: The existing or newly created Subscription object as an unstructured resource.
+//   - *unstructured.Unstructured: The existing or newly created Subscription object.
 func (tc *TestContext) EnsureSubscriptionExistsOrCreate(
 	nn types.NamespacedName,
 ) *unstructured.Unstructured {
@@ -500,10 +535,10 @@ func (tc *TestContext) EnsureSubscriptionExistsOrCreate(
 	resourceID := resources.FormatNamespacedName(nn)
 
 	// Create the subscription object using the necessary values (adapt as needed)
-	sub := createSubscription(nn)
+	sub := CreateSubscription(nn)
 
 	// Ensure the Subscription exists or create it if missing
-	return tc.EnsureResourceExistsOrCreate(
+	return tc.EnsureResourceCreatedOrUpdated(
 		gvk.Subscription,
 		types.NamespacedName{Namespace: sub.Namespace, Name: sub.Name},
 		testf.TransformSpecToUnstructured(sub.Spec),
@@ -511,16 +546,13 @@ func (tc *TestContext) EnsureSubscriptionExistsOrCreate(
 	)
 }
 
-// EnsureResourcesAreEqual ensures that two resources are identical.
-// It compares the resources' data using reflection, allowing flexibility with input types.
+// EnsureResourcesAreEqual asserts that two resource objects are identical.
+// Uses Gomega's `BeEquivalentTo` for a flexible deep comparison.
 //
 // Parameters:
-//   - actualResource (interface{}): The resource that is compared against the expected resource.
-//   - expectedResource (interface{}): The resource that is expected to match the actual resource.
-//   - args (...interface{}): Optional Gomega assertion message arguments. If none are provided, a default message is used.
-//
-// Returns:
-//   - None (assertion failure will stop execution).
+//   - actualResource (interface{}): The resource to be compared.
+//   - expectedResource (interface{}): The expected resource.
+//   - args (...interface{}): Optional Gomega assertion message arguments.
 //
 // Example Usage:
 //
@@ -534,28 +566,10 @@ func (tc *TestContext) EnsureResourcesAreEqual(
 		args = append(args, "Expected resource to be equal to the actual resource, but they differ.")
 	}
 
-	// If both are of the same concrete type, directly compare them
-	if reflect.TypeOf(expectedResource) == reflect.TypeOf(actualResource) {
-		tc.g.Expect(expectedResource).Should(
-			Equal(actualResource),
-			args...,
-		)
-		return
-	}
-
-	// If the types are different, perform deeper checks and give a helpful error
-	if reflect.TypeOf(expectedResource) != reflect.TypeOf(actualResource) {
-		tc.g.Expect(actualResource).Should(
-			Equal(expectedResource),
-			append(args, fmt.Sprintf("Resource types don't match. Expected %T, but got %T", expectedResource, actualResource))...,
-		)
-		return
-	}
-
-	// If types match but the content might differ, use reflect.DeepEqual to compare them
-	tc.g.Expect(reflect.DeepEqual(expectedResource, actualResource)).Should(
-		BeTrue(),
-		append(args, "Resources are of the same type, but their content differs.")...,
+	// Use Gomega's BeEquivalentTo for flexible deep comparison
+	tc.g.Expect(actualResource).To(
+		BeEquivalentTo(expectedResource),
+		args...,
 	)
 }
 
@@ -569,32 +583,27 @@ func (tc *TestContext) EnsureResourcesAreEqual(
 //
 // Example Usage:
 //
-//	obj := tc.EnsureResourceExists(gvk, nn)
-//	tc.EnsureResourceNotNil(obj, "default/my-deployment", "Deployment")
+//	tc.EnsureResourceNotNil(obj, "Deployment %s should not be undefined", "default/my-deployment")
 func (tc *TestContext) EnsureResourceNotNil(
 	obj any,
 	args ...any,
 ) {
-	tc.EnsureResourceConditionMet(obj, true, BeNil(), args...)
+	tc.EnsureResourceConditionMet(obj, Not(BeNil()), args...)
 }
 
-// EnsureResourceCondition verifies that the given resource satisfies or does not satisfy a specified condition,
-// based on the `shouldNot` parameter, and fails the test if the expectation is not met.
+// EnsureResourceConditionMet verifies that a given resource satisfies a specified condition.
+// Callers should explicitly use `Not(matcher)` if they need to assert a negative condition.
 //
 // Parameters:
 //   - obj (any): The resource object to check.
-//   - shouldNot (bool): If true, the condition should **not** be satisfied; otherwise, it should.
-//   - condition (func(any) GomegaMatcher): A Gomega matcher to check (e.g., BeNil, BeEmpty, HaveLen).
+//   - matcher: A Gomega matcher specifying the expected condition (e.g., BeEmpty(), Not(BeEmpty())).
 //   - args (...interface{}): Optional Gomega assertion message arguments. If not provided, a default message is used.
 //
 // Example Usage:
 //
-//	obj := tc.EnsureResourceExists(gvk, nn)
-//	tc.EnsureResourceCondition(obj, false, BeNil()) // Expect BeNil() to be true
-//	tc.EnsureResourceCondition(obj, true, BeEmpty()) // Expect BeEmpty() to be false
+//	tc.EnsureResourceConditionMet(obj, Not(BeEmpty()), "AdminGroups %s should not be empty", "test-admin")
 func (tc *TestContext) EnsureResourceConditionMet(
 	obj any,
-	shouldNot bool,
 	condition gomegaTypes.GomegaMatcher,
 	args ...any,
 ) {
@@ -611,11 +620,7 @@ func (tc *TestContext) EnsureResourceConditionMet(
 	}
 
 	// Perform the assertion using the custom condition
-	if shouldNot {
-		tc.g.Expect(obj).ShouldNot(condition, args...)
-	} else {
-		tc.g.Expect(obj).Should(condition, args...)
-	}
+	tc.g.Expect(obj).To(condition, args...)
 }
 
 // EnsureDeploymentReady ensures that the specified Deployment is ready by checking its status and conditions.
@@ -641,15 +646,13 @@ func (tc *TestContext) EnsureDeploymentReady(
 	resourceID := resources.FormatNamespacedName(nn)
 
 	// Ensure the deployment exists and retrieve the object.
-	u := tc.EnsureResourceExists(
+	deployment := &appsv1.Deployment{}
+	tc.RetrieveResource(
 		gvk.Deployment,
 		nn,
+		deployment,
 		"Deployment %s was expected to exist but was not found", resourceID,
 	)
-
-	// Convert the Unstructured object to a Deployment object
-	deployment := &appsv1.Deployment{}
-	tc.ConvertUnstructuredToResource(u, deployment)
 
 	// Assert that the deployment contains the necessary condition (DeploymentAvailable) with status "True"
 	tc.g.Expect(deployment.Status.Conditions).Should(ContainElement(
@@ -682,14 +685,13 @@ func (tc *TestContext) EnsureCRDEstablished(
 	name string,
 ) {
 	// Ensure the CustomResourceDefinition exists and retrieve the object
-	u := tc.EnsureResourceExists(
-		gvk.CustomResourceDefinition,
-		types.NamespacedName{Name: name}, "CRD %s was expected to exist but was not found", name,
-	)
-
-	// Convert the Unstructured object to a CustomResourceDefinition object
 	crd := &apiextv1.CustomResourceDefinition{}
-	tc.ConvertUnstructuredToResource(u, crd)
+	tc.RetrieveResource(
+		gvk.CustomResourceDefinition,
+		types.NamespacedName{Name: name},
+		crd,
+		"CRD %s was expected to exist but was not found", name,
+	)
 
 	// Assert that the CustomResourceDefinition contains the necessary condition (Established) with status "True"
 	tc.g.Expect(crd.Status.Conditions).Should(ContainElement(
@@ -774,6 +776,22 @@ func (tc *TestContext) EnsureOperatorInstalled(nn types.NamespacedName) {
 	// Construct a resource identifier.
 	resourceID := resources.FormatNamespacedName(nn)
 
+	// Ensure the operator's namespace and operator group are created or updated.
+	tc.EnsureResourceCreatedOrUpdated(
+		gvk.Namespace,
+		types.NamespacedName{Namespace: nn.Namespace},
+		NoOpMutationFn,
+		"Failed to create or update namespace '%s'", nn.Namespace,
+	)
+
+	// Ensure operator group is created or updated in the same namespace
+	tc.EnsureResourceCreatedOrUpdated(
+		gvk.OperatorGroup,
+		nn,
+		NoOpMutationFn,
+		"Failed to create or update operator group '%s'", resourceID,
+	)
+
 	// Retrieve the InstallPlan
 	plan := tc.RetrieveInstallPlan(nn)
 
@@ -790,33 +808,47 @@ func (tc *TestContext) EnsureOperatorInstalled(nn types.NamespacedName) {
 }
 
 // DeleteResource verifies whether a specific Kubernetes resource exists and deletes it if found.
+// If the resource exists, it is deleted using the provided client options. The test will fail if the resource
+// does not exist or if the deletion fails.
 //
 // Parameters:
-//   - t (*testing.T): The test context used for running the test.
-//   - kind (schema.GroupVersionKind): The GroupVersionKind of the resource to be deleted.
-//   - name (string): The name of the resource to be deleted.
-//   - option (...client.DeleteOption): Optional options for the delete operation, such as cascading or propagation policy.
+//   - gvk (schema.GroupVersionKind): The GroupVersionKind of the resource to be deleted.
+//   - nn (types.NamespacedName): The namespace and name of the resource to be deleted.
+//   - clientOption (...client.DeleteOption): Optional delete options such as cascading or propagation policy.
 //
 // Example Usage:
 //
+//	// Example to delete a Deployment named "my-deployment" in the "default" namespace
 //	tc.DeleteResource(t, schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
-//	    "my-deployment", client.DeleteOptions{})
-func (tc *TestContext) DeleteResource(kind schema.GroupVersionKind, name string, option ...client.DeleteOption) {
+//	    types.NamespacedName{Namespace: "default", Name: "my-deployment"}, client.DeleteOptions{})
+//
+//	// Example to delete a Pod with a specified cascading deletion policy
+//	tc.DeleteResource(t, schema.GroupVersionKind{Group: "v1", Version: "v1", Kind: "Pod"},
+//	    types.NamespacedName{Namespace: "default", Name: "my-pod"}, client.DeleteOptions{
+//	        PropagationPolicy: &metav1.DeletePropagationBackground,
+//	    })
+func (tc *TestContext) DeleteResource(
+	gvk schema.GroupVersionKind,
+	nn types.NamespacedName,
+	clientOption ...client.DeleteOption,
+) {
+	// Construct a resource identifier.
+	resourceID := resources.FormatNamespacedName(nn)
+
 	// Ensure the resource exists before attempting deletion
-	tc.g.Get(
-		kind,
-		types.NamespacedName{Name: name},
-	).Eventually().ShouldNot(
-		BeNil(), "Expected %s instance %s to exist before attempting deletion", kind.Kind, name,
+	tc.EnsureResourceExists(
+		gvk,
+		nn,
+		"Expected %s instance %s to exist before attempting deletion", gvk.Kind, resourceID,
 	)
 
 	// Delete the resource if it exists
 	tc.g.Delete(
-		kind,
-		types.NamespacedName{Name: name},
-		option...,
+		gvk,
+		nn,
+		clientOption...,
 	).Eventually().Should(
-		Succeed(), "Failed to delete %s instance %s", kind.Kind, name,
+		Succeed(), "Failed to delete %s instance %s", gvk.Kind, resourceID,
 	)
 }
 
@@ -881,16 +913,14 @@ func (tc *TestContext) RetrieveInstallPlan(nn types.NamespacedName) *ofapi.Insta
 	// Retrieve the InstallPlan name using getInstallPlanName (ensuring Subscription exists if necessary)
 	planName := tc.RetrieveInstallPlanName(nn)
 
-	// Ensure the InstallPlan exists or is created
-	u := tc.EnsureResourceExists(
+	// Ensure the InstallPlan exists and retrieve the object.
+	installPlan := &ofapi.InstallPlan{}
+	tc.RetrieveResource(
 		gvk.InstallPlan,
 		types.NamespacedName{Namespace: nn.Namespace, Name: planName},
+		installPlan,
 		"InstallPlan %s was expected to exist but was not found", planName,
 	)
-
-	// Convert the Unstructured object to an InstallPlan object
-	installPlan := &ofapi.InstallPlan{}
-	tc.ConvertUnstructuredToResource(u, installPlan)
 
 	// Return the InstallPlan object
 	return installPlan
@@ -932,6 +962,82 @@ func (tc *TestContext) RetrieveClusterServiceVersion(nn types.NamespacedName) *o
 	return &csv
 }
 
+// RetrieveDSCInitialization retrieves the DSCInitialization resource.
+//
+// This function ensures that the DSCInitialization resource exists and then retrieves it
+// as a strongly typed object.
+//
+// Parameters:
+//   - nn (types.NamespacedName): The namespaced name (namespace + name) of the DSCInitialization.
+//
+// Returns:
+//   - *dsciv1.DSCInitialization: The retrieved DSCInitialization object.
+//
+// Example Usage:
+//
+//	dsci := tc.RetrieveDSCInitialization(types.NamespacedName{Name: "example-dsci"})
+func (tc *TestContext) RetrieveDSCInitialization(nn types.NamespacedName) *dsciv1.DSCInitialization {
+	// Ensure the DSCInitialization exists and retrieve the object
+	dsci := &dsciv1.DSCInitialization{}
+	tc.RetrieveResource(gvk.DSCInitialization, nn, dsci)
+
+	return dsci
+}
+
+// RetrieveDataScienceCluster retrieves the DataScienceCluster resource.
+//
+// This function ensures that the DataScienceCluster resource exists and then retrieves it
+// as a strongly typed object.
+//
+// Parameters:
+//   - nn (types.NamespacedName): The namespaced name (namespace + name) of the DataScienceCluster.
+//
+// Returns:
+//   - *dsciv1.DataScienceCluster: The retrieved DataScienceCluster object.
+//
+// Example Usage:
+//
+//	dsc := tc.RetrieveDataScienceCluster(types.NamespacedName{Name: "example-dsc"})
+func (tc *TestContext) RetrieveDataScienceCluster(nn types.NamespacedName) *dscv1.DataScienceCluster {
+	// Ensure the DataScienceCluster exists and retrieve the object
+	dsc := &dscv1.DataScienceCluster{}
+	tc.RetrieveResource(gvk.DataScienceCluster, nn, dsc)
+
+	return dsc
+}
+
+// RetrieveResource ensures a Kubernetes resource exists and retrieves it into a typed object.
+//
+// This function first verifies that the resource exists using `EnsureResourceExists` and then
+// converts the retrieved Unstructured object into the provided typed object.
+//
+// Parameters:
+//   - gvk (schema.GroupVersionKind): The GroupVersionKind of the resource to retrieve.
+//   - nn (types.NamespacedName): The namespaced name (namespace + name) of the resource.
+//   - obj (any): A pointer to the typed object where the resource data will be stored.
+//   - args (any, optional): Additional arguments for error messages or logging.
+//
+// Panics:
+//   - If the resource does not exist.
+//   - If conversion from Unstructured to the typed object fails.
+//
+// Example Usage:
+//
+//	dsci := &dsciv1.DSCInitialization{}
+//	tc.RetrieveResource(gvk.DSCInitialization, types.NamespacedName{Name: "example-dsci"}, dsci)
+func (tc *TestContext) RetrieveResource(
+	gvk schema.GroupVersionKind,
+	nn types.NamespacedName,
+	obj any,
+	args ...any,
+) {
+	// Ensure the resource exists and retrieve the object
+	u := tc.EnsureResourceExists(gvk, nn, args...)
+
+	// Convert the Unstructured object to a typed object
+	tc.ConvertUnstructuredToResource(u, obj)
+}
+
 // ApproveInstallPlan approves the provided InstallPlan by applying a patch to update its approval status.
 //
 // This function performs the following steps:
@@ -948,7 +1054,7 @@ func (tc *TestContext) RetrieveClusterServiceVersion(nn types.NamespacedName) *o
 //	tc.ApproveInstallPlan(plan)
 func (tc *TestContext) ApproveInstallPlan(plan *ofapi.InstallPlan) {
 	// Prepare the InstallPlan object to be approved
-	obj := createInstallPlan(plan.ObjectMeta.Name, plan.ObjectMeta.Namespace, plan.Spec.ClusterServiceVersionNames)
+	obj := CreateInstallPlan(plan.ObjectMeta.Name, plan.ObjectMeta.Namespace, plan.Spec.ClusterServiceVersionNames)
 
 	// Set up patch options
 	force := true
@@ -966,8 +1072,8 @@ func (tc *TestContext) ApproveInstallPlan(plan *ofapi.InstallPlan) {
 		)
 }
 
-// createDSCI creates a DSCInitialization CR.
-func createDSCI(name string) *dsciv1.DSCInitialization {
+// CreateDSCI creates a DSCInitialization CR.
+func CreateDSCI(name string) *dsciv1.DSCInitialization {
 	dsciTest := &dsciv1.DSCInitialization{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
@@ -999,8 +1105,8 @@ func createDSCI(name string) *dsciv1.DSCInitialization {
 	return dsciTest
 }
 
-// createDSC creates a DataScienceCluster CR.
-func createDSC(name string) *dscv1.DataScienceCluster {
+// CreateDSC creates a DataScienceCluster CR.
+func CreateDSC(name string) *dscv1.DataScienceCluster {
 	dscTest := &dscv1.DataScienceCluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
@@ -1097,12 +1203,12 @@ func createDSC(name string) *dscv1.DataScienceCluster {
 	return dscTest
 }
 
-// createSubscription creates a Subscription object.
-func createSubscription(nn types.NamespacedName) *ofapi.Subscription {
+// CreateSubscription creates a Subscription object.
+func CreateSubscription(nn types.NamespacedName) *ofapi.Subscription {
 	return &ofapi.Subscription{
 		TypeMeta: metav1.TypeMeta{
-			Kind:       operatorsv1alpha1.SubscriptionKind,
-			APIVersion: operatorsv1alpha1.SubscriptionCRDAPIVersion,
+			Kind:       ofapi.SubscriptionKind,
+			APIVersion: ofapi.SubscriptionCRDAPIVersion,
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      nn.Name,
@@ -1118,12 +1224,12 @@ func createSubscription(nn types.NamespacedName) *ofapi.Subscription {
 	}
 }
 
-// createSubscription creates an InstallPlan object.
-func createInstallPlan(name string, ns string, csvNames []string) *ofapi.InstallPlan {
+// CreateInstallPlan creates an InstallPlan object.
+func CreateInstallPlan(name string, ns string, csvNames []string) *ofapi.InstallPlan {
 	return &ofapi.InstallPlan{
 		TypeMeta: metav1.TypeMeta{
-			Kind:       operatorsv1alpha1.InstallPlanKind,
-			APIVersion: operatorsv1alpha1.InstallPlanAPIVersion,
+			Kind:       ofapi.InstallPlanKind,
+			APIVersion: ofapi.InstallPlanAPIVersion,
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -1137,8 +1243,8 @@ func createInstallPlan(name string, ns string, csvNames []string) *ofapi.Install
 	}
 }
 
-// mockCRDCreation generates a mock CustomResourceDefinition for a given group, version, kind, and component name.
-func mockCRDCreation(group, version, kind, componentName string) *apiextv1.CustomResourceDefinition {
+// MockCRDCreation generates a mock CustomResourceDefinition for a given group, version, kind, and component name.
+func MockCRDCreation(group, version, kind, componentName string) *apiextv1.CustomResourceDefinition {
 	return &apiextv1.CustomResourceDefinition{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: strings.ToLower(fmt.Sprintf("%ss.%s", kind, group)),
@@ -1167,4 +1273,17 @@ func mockCRDCreation(group, version, kind, componentName string) *apiextv1.Custo
 			},
 		},
 	}
+}
+
+func ExtractMatcherFromArgs(args *[]any) gomegaTypes.GomegaMatcher {
+	if len(*args) > 0 {
+		// Check if the last argument is a GomegaMatcher
+		if matcher, ok := (*args)[len(*args)-1].(gomegaTypes.GomegaMatcher); ok {
+			// Remove the matcher from args slice
+			*args = (*args)[:len(*args)-1]
+			return matcher
+		}
+	}
+	// Default to Succeed if no matcher is provided
+	return Succeed()
 }

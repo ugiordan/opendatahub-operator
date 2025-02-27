@@ -28,24 +28,13 @@ import (
 )
 
 type ComponentTestCtx struct {
-	*testf.TestContext
-
-	GVK                  schema.GroupVersionKind
-	DSCName              types.NamespacedName
-	DSCIName             types.NamespacedName
-	ApplicationNamespace string
+	*TestContext
+	// Any additional fields specific to component tests
+	ComponentGVK schema.GroupVersionKind
 }
 
-func NewComponentTestCtx(object common.PlatformObject) (*ComponentTestCtx, error) {
-	tcf, err := testf.NewTestContext(
-		testf.WithTOptions(
-			testf.WithEventuallyTimeout(defaultEventuallyTimeout),
-			testf.WithEventuallyPollingInterval(defaultEventuallyPollInterval),
-			testf.WithConsistentlyDuration(defaultConsistentlyDuration),
-			testf.WithConsistentlyPollingInterval(defaultConsistentlyPollInterval),
-		),
-	)
-
+func NewComponentTestCtx(t *testing.T, object common.PlatformObject) (*ComponentTestCtx, error) {
+	baseCtx, err := NewTestContext(t)
 	if err != nil {
 		return nil, err
 	}
@@ -74,8 +63,8 @@ func NewComponentTestCtx(object common.PlatformObject) (*ComponentTestCtx, error
 	}
 
 	componentCtx := ComponentTestCtx{
-		TestContext:          tcf,
-		GVK:                  ogvk,
+		TestContext:          baseCtx,
+		ComponentGVK:         ogvk,
 		DSCName:              client.ObjectKeyFromObject(&dscList.Items[0]),
 		DSCIName:             client.ObjectKeyFromObject(&dsciList.Items[0]),
 		ApplicationNamespace: dsciList.Items[0].Spec.ApplicationsNamespace,

@@ -23,6 +23,12 @@ var (
 		Kind:    "Namespace",
 	}
 
+	OperatorGroup = schema.GroupVersionKind{
+		Group:   operatorsv1alpha1.SchemeGroupVersion.Group,
+		Version: operatorsv1alpha1.SchemeGroupVersion.Version,
+		Kind:    "OperatorGroup",
+	}
+
 	Subscription = schema.GroupVersionKind{
 		Group:   operatorsv1alpha1.SchemeGroupVersion.Group,
 		Version: operatorsv1alpha1.SchemeGroupVersion.Version,

@@ -127,8 +127,8 @@ func NewTestContext(t *testing.T) (*TestContext, error) { //nolint:thelper
 	release := cluster.GetRelease()
 
 	// setup DSCI and DataScienceCluster CRs since we do not create automatically by operator
-	testDSCI := createDSCI(dsciInstanceName)
-	testDSC := createDSC(dscInstanceName)
+	testDSCI := CreateDSCI(dsciInstanceName)
+	testDSC := CreateDSC(dscInstanceName)
 
 	return &TestContext{
 		TestContext:          tcf,

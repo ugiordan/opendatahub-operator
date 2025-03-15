@@ -178,6 +178,24 @@ func WithMinimalObjectFrom(obj client.Object) ResourceOption {
 	}
 }
 
+// OverrideEventuallyTimeout temporarily changes the Eventually timeout and polling period.
+func (tc *TestContext) OverrideEventuallyTimeout(timeout, pollInterval time.Duration) func() {
+	// Save current timeout values (you'll need to store these manually)
+	previousTimeout := tc.g.DurationBundle.EventuallyTimeout
+	previousPollInterval := tc.g.DurationBundle.EventuallyPollingInterval
+
+	// Override with new values
+	tc.g.SetDefaultEventuallyTimeout(timeout)
+	tc.g.SetDefaultConsistentlyPollingInterval(pollInterval)
+
+	// Return a function to reset them back
+	return func() {
+		// Override with new values
+		tc.g.SetDefaultEventuallyTimeout(previousTimeout)
+		tc.g.SetDefaultConsistentlyPollingInterval(previousPollInterval)
+	}
+}
+
 // EnsureResourceExistsOrNil attempts to retrieve a specific Kubernetes resource from the cluster.
 // It retries fetching the resource until the retry window expires. If the resource exists, it returns it.
 // If the resource does not exist, it returns nil and does not fail the test, which is useful when subsequent actions

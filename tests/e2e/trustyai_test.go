@@ -2,6 +2,7 @@ package e2e_test
 
 import (
 	"testing"
+	"time"
 
 	operatorv1 "github.com/openshift/api/operator/v1"
 	"github.com/stretchr/testify/require"
@@ -86,6 +87,11 @@ func (tc *TrustyAITestCtx) DisableKserve(t *testing.T) {
 
 // SetKserveState updates the Kserve component state and verifies its existence.
 func (tc *TrustyAITestCtx) SetKserveState(state operatorv1.ManagementState, shouldExist bool) {
+	// Temporarily change timeout for this test since it takes lots of time because of FeatureGates
+	// TODO: remove it once we understood why it's taking lots of time for kserve to become Ready/NotReady
+	reset := tc.OverrideEventuallyTimeout(5*time.Minute, 2*time.Second)
+	defer reset() // Ensure reset happens after test completes
+
 	nn := types.NamespacedName{Name: componentApi.KserveInstanceName}
 
 	// Update the Kserve component state in DataScienceCluster.

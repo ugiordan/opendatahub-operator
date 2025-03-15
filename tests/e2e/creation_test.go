@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	gTypes "github.com/onsi/gomega/types"
 	operatorv1 "github.com/openshift/api/operator/v1"
@@ -111,6 +112,10 @@ func (tc *DSCTestCtx) ValidateOperatorsInstallation(t *testing.T) {
 func (tc *DSCTestCtx) ValidateDSCICreation(t *testing.T) {
 	t.Helper()
 
+	// Increase time required to get DSCI created
+	reset := tc.OverrideEventuallyTimeout(5*time.Minute, 20*time.Second)
+	defer reset() // Ensure reset happens after test completes
+
 	tc.EnsureResourceCreatedOrUpdatedWithCondition(
 		WithObjectToCreate(CreateDSCI(tc.DSCInitializationNamespacedName.Name, tc.AppsNamespace)),
 		NoOpMutationFn,
@@ -122,6 +127,10 @@ func (tc *DSCTestCtx) ValidateDSCICreation(t *testing.T) {
 // ValidateDSCCreation validates the creation of a DataScienceCluster.
 func (tc *DSCTestCtx) ValidateDSCCreation(t *testing.T) {
 	t.Helper()
+
+	// Increase time required to get DSC created
+	reset := tc.OverrideEventuallyTimeout(5*time.Minute, 20*time.Second)
+	defer reset() // Ensure reset happens after test completes
 
 	tc.EnsureResourceCreatedOrUpdatedWithCondition(
 		WithObjectToCreate(CreateDSC(tc.DataScienceClusterNamespacedName.Name)),

@@ -156,11 +156,11 @@ func WithListOptions(listOptions *client.ListOptions) ResourceOpts {
 	}
 }
 
-// WithIgnoreNotFound sets the IgnoreNotFound flag to true.
-// This allows operations to skip failures caused by missing resources.
-func WithIgnoreNotFound() ResourceOpts {
+// WithIgnoreNotFound configures whether to skip the existence check and ignore errors if the resource is not found.
+// If set to true (default), the existence check is skipped, and missing resources will not cause errors.
+func WithIgnoreNotFound(ignore bool) ResourceOpts {
 	return func(ro *ResourceOptions) {
-		ro.IgnoreNotFound = true
+		ro.IgnoreNotFound = ignore
 	}
 }
 
@@ -172,11 +172,11 @@ func WithClientDeleteOptions(deleteOptions *client.DeleteOptions) ResourceOpts {
 	}
 }
 
-// WithWaitForDeletion sets the WaitForDeletion flag to true.
+// WithWaitForDeletion sets the WaitForDeletion flag.
 // When enabled, DeleteResource will wait until the resource is fully removed from the cluster.
-func WithWaitForDeletion() ResourceOpts {
+func WithWaitForDeletion(wait bool) ResourceOpts {
 	return func(ro *ResourceOptions) {
-		ro.WaitForDeletion = true
+		ro.WaitForDeletion = wait
 	}
 }
 

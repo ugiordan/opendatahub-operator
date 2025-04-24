@@ -140,6 +140,7 @@ func (tc *KueueTestCtx) ValidateKueuePreCheck(t *testing.T) {
 			&client.DeleteOptions{
 				PropagationPolicy: &propagationPolicy,
 			}),
+		WithWaitForDeletion(true),
 	)
 	tc.DeleteResource(
 		WithMinimalObject(gvk.CustomResourceDefinition, types.NamespacedName{Name: mkConfig}),
@@ -147,6 +148,7 @@ func (tc *KueueTestCtx) ValidateKueuePreCheck(t *testing.T) {
 			&client.DeleteOptions{
 				PropagationPolicy: &propagationPolicy,
 			}),
+		WithWaitForDeletion(true),
 	)
 
 	// Verify the DataScienceCluster become "Ready"
@@ -166,10 +168,8 @@ func (tc *KueueTestCtx) deleteAndValidateCRD(crdName string) {
 			&client.DeleteOptions{
 				PropagationPolicy: &propagationPolicy,
 			}),
+		WithWaitForDeletion(true),
 	)
-
-	// Verify the CRD is deleted
-	tc.EnsureResourceGone(WithMinimalObject(gvk.CustomResourceDefinition, types.NamespacedName{Name: crdName}))
 }
 
 // createMockCRD creates a mock CRD for a given group, version, kind, and namespace.

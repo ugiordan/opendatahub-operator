@@ -1,4 +1,4 @@
-package dscinitialization
+package servicemesh
 
 import (
 	"context"
@@ -6,13 +6,13 @@ import (
 	"path"
 
 	operatorv1 "github.com/openshift/api/operator/v1"
+	conditionsv1 "github.com/openshift/custom-resource-status/conditions/v1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/opendatahub-io/opendatahub-operator/v2/api/common"
 	dsciv1 "github.com/opendatahub-io/opendatahub-operator/v2/api/dscinitialization/v1"
+	dscictrl "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/dscinitialization"
 	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/status"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/feature"
@@ -20,7 +20,7 @@ import (
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/feature/servicemesh"
 )
 
-func (r *DSCInitializationReconciler) configureServiceMesh(ctx context.Context, instance *dsciv1.DSCInitialization) error {
+func (r *ServiceMeshReconciler) configureServiceMesh(ctx context.Context, instance *dsciv1.DSCInitialization) error {
 	log := logf.FromContext(ctx)
 	serviceMeshManagementState := operatorv1.Removed
 	if instance.Spec.ServiceMesh != nil {
@@ -46,7 +46,7 @@ func (r *DSCInitializationReconciler) configureServiceMesh(ctx context.Context, 
 			capabilityErr := capability.Apply(ctx, r.Client)
 			if capabilityErr != nil {
 				log.Error(capabilityErr, "failed applying service mesh resources")
-				r.Recorder.Eventf(instance, corev1.EventTypeWarning, "DSCInitializationReconcileError", "failed applying service mesh resources")
+				r.Recorder.Eventf(instance, corev1.EventTypeWarning, "ServiceMeshReconcileError", "failed applying service mesh resources")
 				return capabilityErr
 			}
 		}
@@ -63,7 +63,7 @@ func (r *DSCInitializationReconciler) configureServiceMesh(ctx context.Context, 
 	return nil
 }
 
-func (r *DSCInitializationReconciler) removeServiceMesh(ctx context.Context, instance *dsciv1.DSCInitialization) error {
+func (r *ServiceMeshReconciler) removeServiceMesh(ctx context.Context, instance *dsciv1.DSCInitialization) error {
 	log := logf.FromContext(ctx)
 	// on condition of Managed, do not handle Removed when set to Removed it trigger DSCI reconcile to clean up
 	if instance.Spec.ServiceMesh == nil {
@@ -85,7 +85,7 @@ func (r *DSCInitializationReconciler) removeServiceMesh(ctx context.Context, ins
 			capabilityErr := capability.Delete(ctx, r.Client)
 			if capabilityErr != nil {
 				log.Error(capabilityErr, "failed deleting service mesh resources")
-				r.Recorder.Eventf(instance, corev1.EventTypeWarning, "DSCInitializationReconcileError", "failed deleting service mesh resources")
+				r.Recorder.Eventf(instance, corev1.EventTypeWarning, "ServiceMeshReconcileError", "failed deleting service mesh resources")
 
 				return capabilityErr
 			}
@@ -94,23 +94,23 @@ func (r *DSCInitializationReconciler) removeServiceMesh(ctx context.Context, ins
 	return nil
 }
 
-func (r *DSCInitializationReconciler) serviceMeshCapability(instance *dsciv1.DSCInitialization, initialCondition *common.Condition) *feature.HandlerWithReporter[*dsciv1.DSCInitialization] { //nolint:lll // Reason: generics are long
+func (r *ServiceMeshReconciler) serviceMeshCapability(instance *dsciv1.DSCInitialization, initialCondition *conditionsv1.Condition) *feature.HandlerWithReporter[*dsciv1.DSCInitialization] { //nolint:lll // Reason: generics are long
 	return feature.NewHandlerWithReporter(
 		feature.ClusterFeaturesHandler(instance, r.serviceMeshCapabilityFeatures(instance)),
 		createCapabilityReporter(r.Client, instance, initialCondition),
 	)
 }
 
-func (r *DSCInitializationReconciler) authorizationCapability(ctx context.Context, instance *dsciv1.DSCInitialization, condition *common.Condition) (*feature.HandlerWithReporter[*dsciv1.DSCInitialization], error) { //nolint:lll // Reason: generics are long
+func (r *ServiceMeshReconciler) authorizationCapability(ctx context.Context, instance *dsciv1.DSCInitialization, condition *conditionsv1.Condition) (*feature.HandlerWithReporter[*dsciv1.DSCInitialization], error) { //nolint:lll // Reason: generics are long
 	authorinoInstalled, err := cluster.SubscriptionExists(ctx, r.Client, "authorino-operator")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list subscriptions %w", err)
 	}
 
 	if !authorinoInstalled {
-		authzMissingOperatorCondition := &common.Condition{
+		authzMissingOperatorCondition := &conditionsv1.Condition{
 			Type:    status.CapabilityServiceMeshAuthorization,
-			Status:  metav1.ConditionFalse,
+			Status:  corev1.ConditionFalse,
 			Reason:  status.MissingOperatorReason,
 			Message: "Authorino operator is not installed on the cluster, skipping authorization capability",
 		}
@@ -129,7 +129,7 @@ func (r *DSCInitializationReconciler) authorizationCapability(ctx context.Contex
 	), nil
 }
 
-func (r *DSCInitializationReconciler) serviceMeshCapabilityFeatures(instance *dsciv1.DSCInitialization) feature.FeaturesProvider {
+func (r *ServiceMeshReconciler) serviceMeshCapabilityFeatures(instance *dsciv1.DSCInitialization) feature.FeaturesProvider {
 	return func(registry feature.FeaturesRegistry) error {
 		controlPlaneSpec := instance.Spec.ServiceMesh.ControlPlane
 
@@ -140,10 +140,9 @@ func (r *DSCInitializationReconciler) serviceMeshCapabilityFeatures(instance *ds
 		return registry.Add(
 			feature.Define("mesh-control-plane-creation").
 				Manifests(
-					manifest.Location(Templates.Location).
-						Include(
-							path.Join(Templates.ServiceMeshDir),
-						),
+					manifest.Location(dscictrl.Templates.Location).Include(
+						path.Join(dscictrl.Templates.ServiceMeshDir),
+					),
 				).
 				WithData(servicemesh.FeatureData.ControlPlane.Define(&instance.Spec).AsAction()).
 				PreConditions(
@@ -156,9 +155,9 @@ func (r *DSCInitializationReconciler) serviceMeshCapabilityFeatures(instance *ds
 			feature.Define("mesh-metrics-collection").
 				EnabledWhen(meshMetricsCollection).
 				Manifests(
-					manifest.Location(Templates.Location).
+					manifest.Location(dscictrl.Templates.Location).
 						Include(
-							path.Join(Templates.MetricsDir),
+							path.Join(dscictrl.Templates.MetricsDir),
 						),
 				).
 				WithData(
@@ -179,18 +178,18 @@ func (r *DSCInitializationReconciler) serviceMeshCapabilityFeatures(instance *ds
 	}
 }
 
-func (r *DSCInitializationReconciler) authorizationFeatures(instance *dsciv1.DSCInitialization) feature.FeaturesProvider {
+func (r *ServiceMeshReconciler) authorizationFeatures(instance *dsciv1.DSCInitialization) feature.FeaturesProvider {
 	return func(registry feature.FeaturesRegistry) error {
 		serviceMeshSpec := instance.Spec.ServiceMesh
 
 		return registry.Add(
 			feature.Define("mesh-control-plane-external-authz").
 				Manifests(
-					manifest.Location(Templates.Location).
+					manifest.Location(dscictrl.Templates.Location).
 						Include(
-							path.Join(Templates.AuthorinoDir, "auth-smm.tmpl.yaml"),
-							path.Join(Templates.AuthorinoDir, "base"),
-							path.Join(Templates.AuthorinoDir, "mesh-authz-ext-provider.patch.tmpl.yaml"),
+							path.Join(dscictrl.Templates.AuthorinoDir, "auth-smm.tmpl.yaml"),
+							path.Join(dscictrl.Templates.AuthorinoDir, "base"),
+							path.Join(dscictrl.Templates.AuthorinoDir, "mesh-authz-ext-provider.patch.tmpl.yaml"),
 						),
 				).
 				WithData(
@@ -216,8 +215,8 @@ func (r *DSCInitializationReconciler) authorizationFeatures(instance *dsciv1.DSC
 			// enabled instead, otherwise it will not have proxy pod injected.
 			feature.Define("enable-proxy-injection-in-authorino-deployment").
 				Manifests(
-					manifest.Location(Templates.Location).
-						Include(path.Join(Templates.AuthorinoDir, "deployment.injection.patch.tmpl.yaml")),
+					manifest.Location(dscictrl.Templates.Location).
+						Include(path.Join(dscictrl.Templates.AuthorinoDir, "deployment.injection.patch.tmpl.yaml")),
 				).
 				PreConditions(
 					func(ctx context.Context, cli client.Client, f *feature.Feature) error {

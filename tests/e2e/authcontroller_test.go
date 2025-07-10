@@ -15,7 +15,10 @@ import (
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/utils/test/matchers/jq"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/utils/test/testf"
 
+	"strings"
+
 	. "github.com/onsi/gomega"
+	k8serr "k8s.io/apimachinery/pkg/api/errors"
 )
 
 const (
@@ -67,23 +70,9 @@ func authControllerTestSuite(t *testing.T) {
 		{"Validate addition of ClusterRole when group is added", authCtx.ValidateAuthCRClusterRoleCreation},
 		{"Validate addition of ClusterRoleBinding when group is added", authCtx.ValidateAuthCRClusterRoleBindingCreation},
 		{"Validate removal of bindings when a group is removed", authCtx.ValidateRemovingGroups},
-	}
-
-	// Append webhook-specific tests if webhook testing is enabled.
-	if testOpts.webhookTest {
-		webhookTests := []TestCase{
-			{"Validate webhook blocks Auth creation with invalid groups", authCtx.ValidateWebhookBlocksInvalidGroupsOnCreation},
-			{"Validate webhook blocks Auth update with invalid groups", authCtx.ValidateWebhookBlocksInvalidGroupsOnUpdate},
-			{"Validate webhook allows Auth with valid groups", authCtx.ValidateWebhookAllowsValidGroups},
-		}
-
-		testCases = append(testCases, TestCase{
-			name: "Webhook Validation",
-			testFn: func(t *testing.T) {
-				t.Helper()
-				RunTestCases(t, webhookTests)
-			},
-		})
+		{"Validate CEL blocks Auth creation with invalid groups", authCtx.ValidateCELBlocksInvalidGroupsOnCreation},
+		{"Validate CEL blocks Auth update with invalid groups", authCtx.ValidateCELBlocksInvalidGroupsOnUpdate},
+		{"Validate CEL allows Auth with valid groups", authCtx.ValidateCELAllowsValidGroups},
 	}
 
 	// Run the test suite.
@@ -257,16 +246,16 @@ func (tc *AuthControllerTestCtx) ValidateRemovingGroups(t *testing.T) {
 		"Expected ClusterRoleBinding '%s' to have exactly one subject with name '%s'", adminGroupClusterRoleBindingName, expectedGroup)
 }
 
-// ValidateWebhookBlocksInvalidGroupsOnCreation tests that the webhook blocks creation of Auth resources
+// ValidateCELBlocksInvalidGroupsOnCreation tests that CEL validation blocks creation of Auth resources
 // with invalid groups. Since Auth resources are singletons (must be named "auth"), we need to delete
-// the existing Auth CR first, test webhook validation on creation, then recreate a valid Auth CR.
-func (tc *AuthControllerTestCtx) ValidateWebhookBlocksInvalidGroupsOnCreation(t *testing.T) {
+// the existing Auth CR first, test CEL validation on creation, then recreate a valid Auth CR.
+func (tc *AuthControllerTestCtx) ValidateCELBlocksInvalidGroupsOnCreation(t *testing.T) {
 	t.Helper()
 
 	// Delete the existing Auth CR to enable creation testing
 	tc.DeleteResource(
 		WithMinimalObject(gvk.Auth, tc.AuthNamespacedName),
-		WithCustomErrorMsg("Failed to delete existing Auth CR before creation webhook testing"),
+		WithCustomErrorMsg("Failed to delete existing Auth CR before creation CEL validation testing"),
 	)
 
 	// Test cases for different invalid creation scenarios
@@ -305,12 +294,12 @@ func (tc *AuthControllerTestCtx) ValidateWebhookBlocksInvalidGroupsOnCreation(t 
 			// Create a test Auth resource with invalid values (must use name "auth" due to singleton constraint)
 			invalidAuth := envtestutil.NewAuth("auth", "", testCase.adminGroups, testCase.allowedGroups)
 
-			// Test webhook validation by attempting to create the invalid resource
-			tc.EnsureWebhookBlocksResourceCreation(
+			// Test CEL validation by attempting to create the invalid resource - expect BadRequest error
+			tc.EnsureCELValidationBlocksResourceCreation(
 				WithObjectToCreate(invalidAuth),
 				WithInvalidValue(testCase.invalidValue),
 				WithFieldName(testCase.fieldName),
-				WithCustomErrorMsg("Expected Auth resource creation with %s in %s to be blocked by webhook", testCase.invalidValue, testCase.fieldName),
+				WithCustomErrorMsg("Expected Auth resource creation with %s in %s to be blocked by CEL validation", testCase.invalidValue, testCase.fieldName),
 			)
 		})
 	}
@@ -319,7 +308,7 @@ func (tc *AuthControllerTestCtx) ValidateWebhookBlocksInvalidGroupsOnCreation(t 
 // ValidateWebhookBlocksInvalidGroupsOnUpdate tests that the webhook blocks Auth resources
 // with invalid groups in both AdminGroups and AllowedGroups fields.
 // Since Auth resources must be named "auth", we test by attempting to update the existing resource.
-func (tc *AuthControllerTestCtx) ValidateWebhookBlocksInvalidGroupsOnUpdate(t *testing.T) {
+func (tc *AuthControllerTestCtx) ValidateCELBlocksInvalidGroupsOnUpdate(t *testing.T) {
 	t.Helper()
 
 	testCases := []struct {
@@ -350,21 +339,21 @@ func (tc *AuthControllerTestCtx) ValidateWebhookBlocksInvalidGroupsOnUpdate(t *t
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			// Test webhook validation by attempting to update the existing "auth" resource
-			tc.EnsureWebhookBlocksResourceUpdate(
+			// Test CEL validation by attempting to update the existing "auth" resource
+			tc.EnsureCELValidationBlocksResourceUpdate(
 				WithMinimalObject(gvk.Auth, tc.AuthNamespacedName),
 				WithMutateFunc(testf.Transform(testCase.transform)),
 				WithInvalidValue(testCase.invalidValue),
 				WithFieldName(testCase.fieldName),
-				WithCustomErrorMsg("Expected Auth resource update with %s in %s to be blocked by webhook", testCase.invalidValue, testCase.fieldName),
+				WithCustomErrorMsg("Expected Auth resource update with %s in %s to be blocked by CEL validation", testCase.invalidValue, testCase.fieldName),
 			)
 		})
 	}
 }
 
-// ValidateWebhookAllowsValidGroups tests that the webhook allows Auth resources with valid groups.
+// ValidateCELAllowsValidGroups tests that CEL validation allows Auth resources with valid groups.
 // Since Auth resources must be named "auth", we test by updating the existing resource.
-func (tc *AuthControllerTestCtx) ValidateWebhookAllowsValidGroups(t *testing.T) {
+func (tc *AuthControllerTestCtx) ValidateCELAllowsValidGroups(t *testing.T) {
 	t.Helper()
 
 	testCases := []struct {
@@ -386,7 +375,7 @@ func (tc *AuthControllerTestCtx) ValidateWebhookAllowsValidGroups(t *testing.T) 
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			// Test that the webhook allows this valid update
+			// Test that CEL validation allows this valid update
 			tc.EnsureResourceCreatedOrUpdated(
 				WithMinimalObject(gvk.Auth, tc.AuthNamespacedName),
 				WithMutateFunc(testf.Transform(testCase.transform)),
@@ -394,4 +383,69 @@ func (tc *AuthControllerTestCtx) ValidateWebhookAllowsValidGroups(t *testing.T) 
 			)
 		})
 	}
+}
+
+// EnsureCELValidationBlocksResourceCreation verifies that CEL validation blocks creation of resources with invalid values.
+// CEL validation errors are returned as BadRequest (HTTP 400) errors instead of Forbidden (HTTP 403) from webhooks.
+func (tc *AuthControllerTestCtx) EnsureCELValidationBlocksResourceCreation(opts ...ResourceOpts) {
+	Eventually(func(g Gomega) {
+		ro := tc.NewResourceOptions(opts...)
+		_, err := tc.g.Create(ro.Obj, ro.NN).Get()
+
+		g.Expect(err).To(HaveOccurred(),
+			"Expected Auth resource creation to fail due to CEL validation")
+
+		// CEL validation errors are BadRequest (HTTP 400) errors
+		g.Expect(k8serr.IsBadRequest(err)).To(BeTrue(),
+			"Expected BadRequest error from CEL validation, got: %v", err)
+
+		// Validate error message content
+		errorMsg := err.Error()
+
+		// Field name validation if provided
+		if ro.FieldName != "" {
+			g.Expect(errorMsg).To(Or(
+				ContainSubstring(ro.FieldName),
+				ContainSubstring(strings.ToLower(ro.FieldName)),
+			), "Expected error message to reference field '%s', got: %s", ro.FieldName, errorMsg)
+		}
+
+		// Invalid value validation if provided
+		if ro.InvalidValue != "" && ro.InvalidValue != "empty string" {
+			g.Expect(errorMsg).To(ContainSubstring(ro.InvalidValue),
+				"Expected error message to contain invalid value '%s', got: %s", ro.InvalidValue, errorMsg)
+		}
+	}).Should(Succeed(), "Failed to validate CEL validation blocking behavior")
+}
+
+// EnsureCELValidationBlocksResourceUpdate verifies that CEL validation blocks updates to resources with invalid values.
+func (tc *AuthControllerTestCtx) EnsureCELValidationBlocksResourceUpdate(opts ...ResourceOpts) {
+	Eventually(func(g Gomega) {
+		ro := tc.NewResourceOptions(opts...)
+		_, err := tc.g.Update(ro.GVK, ro.NN, ro.MutateFunc).Get()
+
+		g.Expect(err).To(HaveOccurred(),
+			"Expected Auth resource update to fail due to CEL validation")
+
+		// CEL validation errors are BadRequest (HTTP 400) errors
+		g.Expect(k8serr.IsBadRequest(err)).To(BeTrue(),
+			"Expected BadRequest error from CEL validation, got: %v", err)
+
+		// Validate error message content
+		errorMsg := err.Error()
+
+		// Field name validation if provided
+		if ro.FieldName != "" {
+			g.Expect(errorMsg).To(Or(
+				ContainSubstring(ro.FieldName),
+				ContainSubstring(strings.ToLower(ro.FieldName)),
+			), "Expected error message to reference field '%s', got: %s", ro.FieldName, errorMsg)
+		}
+
+		// Invalid value validation if provided
+		if ro.InvalidValue != "" && ro.InvalidValue != "empty string" {
+			g.Expect(errorMsg).To(ContainSubstring(ro.InvalidValue),
+				"Expected error message to contain invalid value '%s', got: %s", ro.InvalidValue, errorMsg)
+		}
+	}).Should(Succeed(), "Failed to validate CEL validation blocking behavior")
 }

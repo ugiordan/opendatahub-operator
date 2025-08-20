@@ -5,6 +5,7 @@ import (
 
 	"github.com/onsi/gomega/matchers"
 	gTypes "github.com/onsi/gomega/types"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -236,6 +237,13 @@ func ensureResourceAppliedGomegaFunction(
 		// Fetch the resource
 		var err error
 		*u, err = applyResourceFn(ro.Obj, ro.MutateFunc).Get()
+
+		// Handle IgnoreNotFound flag for graceful error handling
+		if ro.IgnoreNotFound && err != nil && errors.IsNotFound(err) {
+			// Resource not found, but we're ignoring it - set to nil and continue
+			*u = nil
+			return
+		}
 
 		// Evaluate the condition to check if failure is expected
 		expectingFailure := isFailureExpected(ro.Condition)

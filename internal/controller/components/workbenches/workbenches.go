@@ -145,6 +145,17 @@ func (s *componentHandler) UpdateDSCStatus(ctx context.Context, rr *types.Reconc
 		return cs, nil
 	}
 
+	// If component CR has deletionTimestamp, it's being deleted -> report CleanupInProgress
+	if !c.GetDeletionTimestamp().IsZero() {
+		rr.Conditions.MarkFalse(
+			ReadyConditionType,
+			conditions.WithReason("CleanupInProgress"),
+			conditions.WithMessage("Component cleanup is in progress"),
+			conditions.WithSeverity(common.ConditionSeverityInfo),
+		)
+		return metav1.ConditionFalse, nil
+	}
+
 	dsc, ok := rr.Instance.(*dscv1.DataScienceCluster)
 	if !ok {
 		return cs, errors.New("failed to convert to DataScienceCluster")

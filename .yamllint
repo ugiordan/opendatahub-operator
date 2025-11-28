@@ -1,0 +1,57 @@
+---
+# yamllint configuration for security-focused YAML validation
+# JIRA: RHOAIENG-38196 - Spike: Investigate tuning CodeRabbit
+
+extends: default
+
+rules:
+  # Line length - relaxed for readability
+  line-length:
+    max: 120
+    level: warning
+
+  # Indentation - enforce consistency
+  indentation:
+    spaces: 2
+    indent-sequences: true
+    check-multi-line-strings: false
+
+  # Comments - require spacing
+  comments:
+    min-spaces-from-content: 1
+
+  # Trailing spaces - enforce clean files
+  trailing-spaces: enable
+
+  # Document start - optional for flexibility
+  document-start: disable
+
+  # Truthy values - enforce K8s-style booleans only
+  truthy:
+    allowed-values: ['true', 'false']
+    check-keys: true
+
+  # Empty values - security check
+  empty-values:
+    forbid-in-block-mappings: true
+    forbid-in-flow-mappings: true
+
+  # Key duplicates - prevent configuration errors
+  key-duplicates: enable
+
+  # Brackets and braces - enforce consistency
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 0
+
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 0
+
+ignore: |
+  vendor/
+  bin/
+  .git/
+  testdata/
+  **/*.pb.go
+  **/*.generated.yaml

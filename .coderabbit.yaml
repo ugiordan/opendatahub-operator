@@ -1,0 +1,179 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+# CodeRabbit Configuration - PR Incremental Security Scanning
+# JIRA: RHOAIENG-38196 - Spike: Investigate tuning CodeRabbit
+# Parent: RHOAISTRAT-752 - ODH Security Hardening with AI
+
+# DEFAULT MODE: Only scans files CHANGED in the PR
+# For full codebase scan, see .github/workflows/security-full-scan.yml
+
+language: "en-US"
+early_access: false
+
+tone_instructions: |
+  Focus on security vulnerabilities and misconfigurations. Be specific and actionable.
+  Prioritize: 1) Secrets/credentials, 2) RBAC over-permissions, 3) OWASP Top 10
+  Provide remediation guidance with code examples where applicable.
+
+reviews:
+  profile: assertive
+
+  # Non-blocking mode for PoC (gather comprehensive data first)
+  request_changes_workflow: false
+
+  high_level_summary: true
+  review_status: true
+  collapse_walkthrough: false
+  poem: false
+
+  commit_status: true
+  fail_commit_status: false  # Don't block PRs during PoC evaluation
+
+  # Comprehensive security tool suite
+  tools:
+    # Secrets detection - Pattern-based
+    # Note: TruffleHog (verified credentials) runs in GitHub Actions for full codebase scans
+    gitleaks:
+      enabled: true
+
+    # Custom security rules (RBAC, OWASP, operator patterns)
+    semgrep:
+      enabled: true
+      config_file: "semgrep.yaml"
+
+    # IaC security (K8s, Dockerfile, Terraform misconfigurations)
+    checkov:
+      enabled: true
+
+    # Dependency vulnerability scanning (go.mod, package.json, etc.)
+    osvScanner:
+      enabled: true
+
+    # Disable golangci-lint (already runs in CI with gosec enabled)
+    golangci-lint:
+      enabled: false
+
+    # Shell script security
+    shellcheck:
+      enabled: true
+
+    # Dockerfile security
+    hadolint:
+      enabled: true
+
+    # YAML linting (K8s manifest validation)
+    yamllint:
+      enabled: true
+
+  # Comprehensive path-specific security instructions
+  # Note: Pre-merge checks are implemented via Semgrep rules (see semgrep.yaml)
+  # and path-specific instructions below
+  path_instructions:
+    # Go source code security
+    - path: "pkg/controller/**/*.go"
+      instructions: |
+        CRITICAL SECURITY CHECKS:
+        1. Hardcoded secrets/credentials
+        2. Command injection via os/exec without validation
+        3. SQL injection patterns
+        4. Unvalidated user input from CRs
+        5. Missing error handling for security operations
+        6. Insecure TLS configuration
+        7. Path traversal vulnerabilities
+
+    - path: "internal/controller/**/*.go"
+      instructions: |
+        CRITICAL SECURITY CHECKS:
+        1. Hardcoded secrets/credentials
+        2. Reconciliation loop safety (infinite loops, resource exhaustion)
+        3. Proper error handling for security-critical operations
+        4. Validation of CR spec fields before use
+
+    - path: "pkg/webhook/**/*.go"
+      instructions: |
+        WEBHOOK SECURITY CHECKS:
+        1. Input validation for all CR fields
+        2. TLS configuration (no InsecureSkipVerify)
+        3. Proper authentication/authorization
+        4. Webhook timeout configuration
+        5. Denial of service prevention (resource limits)
+
+    - path: "api/**/*_types.go"
+      instructions: |
+        API SECURITY CHECKS:
+        1. Kubebuilder validation markers on all fields
+        2. Proper RBAC markers
+        3. Sensitive fields marked appropriately
+        4. MaxLength validation on string fields
+        5. Enum validation where applicable
+
+    # RBAC security (consolidated rule for all RBAC manifests)
+    - path: "**/rbac/**/*.yaml"
+      instructions: |
+        RBAC SECURITY CHECKS:
+        1. NO wildcards in resources: ["*"]
+        2. NO wildcards in verbs: ["*"]
+        3. NO cluster-admin bindings
+        4. Principle of least privilege
+        5. Separate roles for different components
+        6. Verify minimum required permissions
+        7. Check for overly broad resource access
+        8. Ensure proper namespace scoping
+
+    # Kubernetes manifests
+    - path: "**/config/**/*.yaml"
+      instructions: |
+        K8S MANIFEST SECURITY:
+        1. No plaintext secrets
+        2. SecurityContext defined (runAsNonRoot, readOnlyRootFilesystem)
+        3. Resource limits defined
+        4. No privileged containers
+        5. Network policies where appropriate
+
+    # Dockerfiles
+    - path: "**/Dockerfile*"
+      instructions: |
+        DOCKERFILE SECURITY:
+        1. No secrets in build args or ENV
+        2. Use specific image tags (not 'latest')
+        3. Run as non-root user
+        4. Minimize layers and installed packages
+        5. Use multi-stage builds for security
+
+    # Shell scripts
+    - path: "**/*.sh"
+      instructions: |
+        SHELL SCRIPT SECURITY:
+        1. No hardcoded credentials
+        2. Proper quoting to prevent injection
+        3. Use of 'set -euo pipefail'
+        4. Input validation
+        5. Avoid eval and dynamic command execution
+
+  # Exclude non-security-critical paths
+  # NOTE: Security tools (gitleaks, semgrep) scan ALL files including tests to catch secrets
+  # Test files often contain sample credentials, tokens, and relaxed RBAC - must be scanned
+  path_filters:
+    - "!vendor/**"
+    - "!bin/**"
+    - "!.git/**"
+    - "!**/*.sum"
+    - "!**/*.pb.go"
+    - "!**/*.generated.go"
+
+  auto_review:
+    enabled: true
+    drafts: false
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"
+    base_branches:
+      - main
+      - master
+      - rhoai
+
+knowledge_base:
+  learnings:
+    scope: local
+  issues:
+    scope: local

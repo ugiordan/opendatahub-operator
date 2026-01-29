@@ -480,67 +480,15 @@ rules:
 
   - id: operator-run-as-root
     patterns:
-      # Match Pods and controller resources (Deployment, StatefulSet, Job, DaemonSet, CronJob)
-      - pattern-either:
-          # Direct Pod
-          - pattern: |
-              kind: Pod
-              ...
-              spec:
-                ...
-          # Deployment/StatefulSet/DaemonSet
-          - pattern: |
-              kind: $KIND
-              ...
-              spec:
-                ...
-                template:
-                  spec:
-                    ...
-          # Job
-          - pattern: |
-              kind: Job
-              ...
-              spec:
-                template:
-                  spec:
-                    ...
-          # CronJob
-          - pattern: |
-              kind: CronJob
-              ...
-              spec:
-                jobTemplate:
-                  spec:
-                    template:
-                      spec:
-                        ...
-      # Exclude if pod/template-level runAsNonRoot is set
-      - pattern-not-inside: |
-          spec:
+      - pattern-not: |
+          securityContext:
             ...
-            securityContext:
-              ...
-              runAsNonRoot: true
-              ...
-      # Exclude if pod template-level runAsNonRoot is set (for controllers)
-      - pattern-not-inside: |
-          template:
-            spec:
-              ...
-              securityContext:
-                ...
-                runAsNonRoot: true
-                ...
-      # Exclude if all containers have runAsNonRoot set
-      - pattern-not-inside: |
-          containers:
-            - ...
-              securityContext:
-                ...
-                runAsNonRoot: true
-                ...
-    message: "Resource missing runAsNonRoot security context. Set runAsNonRoot: true at pod-level or container-level to prevent running as root."
+            runAsNonRoot: true
+            ...
+      - pattern-inside: |
+          kind: Pod
+          ...
+    message: "Pod missing runAsNonRoot security context. Containers should not run as root."
     severity: WARNING
     languages: [yaml]
     metadata:

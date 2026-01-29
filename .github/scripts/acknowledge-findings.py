@@ -33,16 +33,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 
-
 class FindingAcknowledger:
     """Interactive tool for acknowledging security findings"""
 
     def __init__(self, workspace: str = '.', team: Optional[str] = None):
         self.workspace = Path(workspace)
-        self.baseline_path = self.workspace / '.github' / 'config' / 'security-baseline.yaml'
         self.team = team or os.getenv('USER', 'unknown-user')
         self.baseline_data = {}
         self.available_tools = []
+        self.baseline_path = self.workspace / '.github' / 'config' / 'security-baseline.yaml'
 
     def detect_available_findings(self) -> Dict[str, Path]:
         """Detect which tool output files exist in workspace
@@ -50,9 +49,6 @@ class FindingAcknowledger:
         Returns:
             Dict mapping tool name to file path
         """
-        # Reset available_tools to prevent duplicates on repeated invocations
-        self.available_tools = []
-
         tool_files = {
             'gitleaks': 'gitleaks.json',
             'trufflehog': 'trufflehog.json',
@@ -74,80 +70,153 @@ class FindingAcknowledger:
 
         return found
 
-    def load_baseline(self) -> None:
-        """Load existing baseline file or create new structure
+    def _create_empty_baseline(self) -> Dict:
+        """Create empty baseline structure"""
+        return {
+            'version': '2.0',
+            'description': 'Acknowledged security findings that are not real issues',
+            '_comment': 'Findings acknowledged by teams using CLI tool or Claude skill',
+            'gitleaks': [],
+            'trufflehog': [],
+            'semgrep': [],
+            'shellcheck': [],
+            'hadolint': [],
+            'yamllint': [],
+            'actionlint': [],
+            'kube-linter': [],
+            'rbac-analyzer': []
+        }
 
-        Tries in order:
-        1. .github/config/security-baseline.yaml (v2.0 - preferred)
-        2. .security-baseline.json (v2.0 - backward compat)
-        3. Create new baseline if neither exists
+    def _validate_baseline_schema(self, baseline_data: Dict) -> bool:
+        """Validate baseline has required structure and all fields are valid
+
+        Args:
+            baseline_data: Baseline dictionary to validate
+
+        Returns:
+            True if baseline is valid, False otherwise
         """
-        # Try YAML baseline first (preferred format)
-        yaml_path = self.workspace / '.github' / 'config' / 'security-baseline.yaml'
-        json_path = self.workspace / '.security-baseline.json'
+        if not isinstance(baseline_data, dict):
+            print(f"   ❌ Baseline must be a dictionary, got {type(baseline_data)}")
+            return False
 
-        if yaml_path.exists():
-            with open(yaml_path) as f:
-                loaded = yaml.safe_load(f)
-                # Handle empty YAML files (yaml.safe_load returns None)
-                if not loaded or not isinstance(loaded, dict):
-                    self.baseline_data = {
-                        'version': '2.0',
-                        'description': 'Acknowledged security findings that are not real issues',
-                        '_comment': 'Findings acknowledged by teams using CLI tool or Claude skill',
-                        'gitleaks': [],
-                        'trufflehog': [],
-                        'semgrep': [],
-                        'shellcheck': [],
-                        'hadolint': [],
-                        'yamllint': [],
-                        'actionlint': [],
-                        'kube-linter': [],
-                        'rbac-analyzer': []
-                    }
-                else:
-                    self.baseline_data = loaded
-        elif json_path.exists():
+        # Required top-level keys
+        required_keys = ['version']
+        for key in required_keys:
+            if key not in baseline_data:
+                print(f"   ❌ Missing required key: '{key}'")
+                return False
+
+        # Check version format
+        if not isinstance(baseline_data.get('version'), str):
+            print(f"   ❌ 'version' must be a string")
+            return False
+
+        # All tool keys should be lists if present
+        tool_keys = ['gitleaks', 'trufflehog', 'semgrep', 'shellcheck',
+                     'hadolint', 'yamllint', 'actionlint', 'kube-linter', 'rbac-analyzer']
+
+        for tool_key in tool_keys:
+            if tool_key in baseline_data:
+                if not isinstance(baseline_data[tool_key], list):
+                    print(f"   ❌ '{tool_key}' must be a list, got {type(baseline_data[tool_key])}")
+                    return False
+
+                # Validate each finding in the list has required fields
+                for i, finding in enumerate(baseline_data[tool_key]):
+                    if not isinstance(finding, dict):
+                        print(f"   ❌ {tool_key}[{i}] must be a dictionary, got {type(finding)}")
+                        return False
+
+                    # Most findings should have at minimum a hash or rule_id
+                    if 'hash' not in finding and 'rule_id' not in finding and 'RuleId' not in finding:
+                        print(f"   ⚠️  {tool_key}[{i}] missing identifier (hash/rule_id/RuleId)")
+                        # Don't fail validation, just warn
+
+        return True
+
+    def load_baseline(self) -> None:
+        """Load existing baseline from GitHub Secret (via environment) or create new
+
+        Checks SECURITY_BASELINE environment variable (decompressed YAML from GitHub Actions)
+        If not set, creates an empty baseline for initial setup
+
+        No Vault dependency required - uses GitHub Secrets workflow
+        """
+        repo_name = self.workspace.name
+
+        # Try to load from SECURITY_BASELINE environment variable
+        # This is set by GitHub Actions after decompressing the GitHub Secret
+        baseline_yaml = os.getenv('SECURITY_BASELINE')
+
+        if baseline_yaml:
+            # Baseline provided from GitHub Actions workflow
             try:
-                with open(json_path) as f:
-                    loaded = json.load(f)
-                    # Validate loaded data is a dict
-                    if not loaded or not isinstance(loaded, dict):
-                        raise ValueError("Invalid baseline format")
-                    self.baseline_data = loaded
-                print("[INFO] Loaded legacy JSON baseline - will migrate to YAML on save", file=sys.stderr)
-            except (json.JSONDecodeError, ValueError) as e:
-                print(f"[WARN] Failed to load {json_path}: {e} - using empty baseline", file=sys.stderr)
-                self.baseline_data = {
-                    'version': '2.0',
-                    'description': 'Acknowledged security findings that are not real issues',
-                    '_comment': 'Findings acknowledged by teams using CLI tool or Claude skill',
-                    'gitleaks': [],
-                    'trufflehog': [],
-                    'semgrep': [],
-                    'shellcheck': [],
-                    'hadolint': [],
-                    'yamllint': [],
-                    'actionlint': [],
-                    'kube-linter': [],
-                    'rbac-analyzer': []
-                }
-        else:
-            # Create new baseline structure
-            self.baseline_data = {
-                'version': '2.0',
-                'description': 'Acknowledged security findings that are not real issues',
-                '_comment': 'Findings acknowledged by teams using CLI tool or Claude skill',
-                'gitleaks': [],
-                'trufflehog': [],
-                'semgrep': [],
-                'shellcheck': [],
-                'hadolint': [],
-                'yamllint': [],
-                'actionlint': [],
-                'kube-linter': [],
-                'rbac-analyzer': []
-            }
+                self.baseline_data = yaml.safe_load(baseline_yaml)
+                print(f"✅ Loaded baseline from GitHub Secret (via SECURITY_BASELINE env var)")
+
+                # Validate baseline schema
+                if not self._validate_baseline_schema(self.baseline_data):
+                    print(f"⚠️  Baseline has invalid schema, creating new baseline")
+                    self.baseline_data = self._create_empty_baseline()
+
+                return
+            except yaml.YAMLError as e:
+                print(f"❌ Failed to parse baseline YAML from SECURITY_BASELINE environment variable")
+                print(f"   Error: {e}")
+                print(f"   The SECURITY_BASELINE secret may be corrupted or malformed")
+                print(f"")
+                print(f"   Troubleshooting steps:")
+                print(f"   1. Verify the secret is properly compressed and encoded:")
+                print(f"      gh secret get SECURITY_BASELINE --repo <repo> | base64 -d | gunzip | head")
+                print(f"   2. Re-upload the baseline secret:")
+                print(f"      cat baseline.yaml | gzip | base64 | gh secret set SECURITY_BASELINE --repo <repo> --body-file -")
+                sys.exit(1)
+            except Exception as e:
+                print(f"❌ Unexpected error loading baseline from SECURITY_BASELINE")
+                print(f"   Error: {e}")
+                print(f"   Please report this issue with the error details above")
+                sys.exit(1)
+
+        # No baseline environment variable - check if baseline file exists locally
+        baseline_file = self.workspace / '.github' / 'config' / 'security-baseline.yaml'
+        if baseline_file.exists():
+            # Load from file (user might be working on local baseline)
+            try:
+                with open(baseline_file) as f:
+                    self.baseline_data = yaml.safe_load(f)
+                print(f"✅ Loaded baseline from local file: {baseline_file}")
+                print("   ⚠️  NOTE: This is a local copy. You'll need to compress and upload to GitHub Secret")
+
+                # Validate baseline schema
+                if not self._validate_baseline_schema(self.baseline_data):
+                    print(f"⚠️  Baseline has invalid schema, creating new baseline")
+                    self.baseline_data = self._create_empty_baseline()
+
+                return
+            except yaml.YAMLError as e:
+                print(f"❌ Failed to parse local baseline YAML file: {baseline_file}")
+                print(f"   Error: {e}")
+                print(f"   The file may be corrupted or have invalid YAML syntax")
+                print(f"   Creating new baseline instead")
+                self.baseline_data = self._create_empty_baseline()
+                return
+            except FileNotFoundError:
+                print(f"⚠️  Baseline file not found: {baseline_file}")
+            except PermissionError:
+                print(f"❌ Permission denied reading baseline file: {baseline_file}")
+                print(f"   Check file permissions and try again")
+                sys.exit(1)
+            except Exception as e:
+                print(f"❌ Unexpected error loading local baseline: {e}")
+                print(f"   Creating new baseline instead")
+                self.baseline_data = self._create_empty_baseline()
+                return
+
+        # No baseline found - create new empty baseline
+        print(f"ℹ️  No baseline found for {repo_name}")
+        print(f"   Creating new baseline")
+        self.baseline_data = self._create_empty_baseline()
 
     def parse_gitleaks(self, filepath: Path) -> List[Dict[str, Any]]:
         """Parse Gitleaks JSON output"""
@@ -193,9 +262,7 @@ class FindingAcknowledger:
 
                 for report in reports:
                     # kube-linter v0.7.6+ structure: Object.K8sObject contains the resource info
-                    # Fallback: if K8sObject doesn't exist, use Object directly for forward compatibility
-                    obj_container = report.get('Object', {})
-                    obj = obj_container.get('K8sObject', obj_container)
+                    obj = report.get('Object', {}).get('K8sObject', {})
                     findings.append({
                         'check': report.get('Check', 'unknown'),
                         'object': {
@@ -545,11 +612,7 @@ class FindingAcknowledger:
                 return []
 
             try:
-                # Filter empty tokens and deduplicate indices
-                indices = sorted(set(int(x.strip()) for x in selection.split(',') if x.strip()))
-                if not indices:
-                    print("⚠️  Please enter at least one number")
-                    continue
+                indices = [int(x.strip()) for x in selection.split(',')]
                 if all(1 <= idx <= len(findings) for idx in indices):
                     break
                 else:
@@ -613,15 +676,142 @@ class FindingAcknowledger:
         self.baseline_data[tool].extend(new_acknowledgments)
 
     def save_baseline(self) -> None:
-        """Save baseline file with proper formatting (YAML)"""
-        # Ensure directory exists
+        """Save baseline to GitHub Secret
+
+        Outputs the baseline YAML and provides instructions for compressing
+        and uploading to GitHub Secrets
+        """
+        import subprocess
+        import base64
+        import gzip
+
+        repo_name = self.workspace.name
+
+        # Convert baseline to YAML
+        baseline_yaml = yaml.dump(
+            self.baseline_data,
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True
+        )
+
+        # Save to temporary file
         self.baseline_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(self.baseline_path, 'w') as f:
-            yaml.dump(self.baseline_data, f,
-                     default_flow_style=False,  # Use block style (more readable)
-                     sort_keys=False,            # Preserve insertion order
-                     allow_unicode=True)
+            f.write(baseline_yaml)
+
+        print(f"\n✅ Baseline saved to: {self.baseline_path}")
+
+        # Calculate sizes
+        uncompressed_size = len(baseline_yaml.encode())
+        compressed_data = gzip.compress(baseline_yaml.encode())
+        compressed_size = len(compressed_data)
+        encoded_size = len(base64.b64encode(compressed_data))
+
+        print(f"\n📊 Baseline Statistics:")
+        print(f"   Uncompressed: {uncompressed_size} bytes")
+        print(f"   Compressed: {compressed_size} bytes ({100 - (compressed_size * 100 // uncompressed_size)}% reduction)")
+        print(f"   Base64 encoded: {encoded_size} bytes")
+        print(f"   GitHub Secret Limit: 49,152 bytes")
+        print(f"   Usage: {encoded_size * 100 // 49152}%")
+
+        if encoded_size > 45000:
+            print(f"\n⚠️  WARNING: Approaching GitHub secret size limit!")
+            print(f"   Consider cleaning up old acknowledgments")
+
+        # Detect if we're in a git repository
+        is_git_repo = False
+        repo_full_name = "owner/repo"
+
+        try:
+            # Check if we're in a git repository
+            subprocess.run(
+                ['git', 'rev-parse', '--git-dir'],
+                cwd=self.workspace,
+                capture_output=True,
+                check=True,
+                timeout=5
+            )
+            is_git_repo = True
+
+            # Get repository info (remote URL)
+            try:
+                repo_info = subprocess.check_output(
+                    ['git', 'config', '--get', 'remote.origin.url'],
+                    cwd=self.workspace,
+                    text=True,
+                    timeout=5
+                ).strip()
+
+                # Extract owner/repo from git URL (supports both HTTPS and SSH formats)
+                if 'github.com' in repo_info:
+                    # Remove .git suffix
+                    repo_info = repo_info.replace('.git', '')
+
+                    # Handle SSH format: git@github.com:owner/repo
+                    if 'git@github.com:' in repo_info:
+                        # Extract after the colon
+                        repo_path = repo_info.split('git@github.com:')[-1]
+                        parts = repo_path.split('/')
+                        if len(parts) >= 2:
+                            repo_full_name = f"{parts[-2]}/{parts[-1]}"
+                    # Handle HTTPS format: https://github.com/owner/repo
+                    elif 'github.com/' in repo_info:
+                        parts = repo_info.split('/')
+                        if len(parts) >= 2:
+                            repo_full_name = f"{parts[-2]}/{parts[-1]}"
+            except subprocess.SubprocessError:
+                # No remote configured, use placeholder
+                pass
+        except (subprocess.SubprocessError, FileNotFoundError):
+            # Not in a git repository or git not installed
+            is_git_repo = False
+
+        # Show different instructions based on git repo detection
+        if not is_git_repo:
+            print(f"\n⚠️  WARNING: Not in a git repository")
+            print(f"   You'll need to manually upload the baseline to GitHub Secrets")
+
+        print(f"\n📝 Next Steps:")
+        print(f"   1. Compress and encode the baseline:")
+        print(f"")
+        print(f"      cat {self.baseline_path} | gzip | base64 -w 0 > /tmp/baseline-compressed.txt")
+        print(f"")
+        print(f"   2. Upload to GitHub Secret:")
+        print(f"")
+        if is_git_repo:
+            print(f"      gh secret set SECURITY_BASELINE -b \"$(cat /tmp/baseline-compressed.txt)\" --repo {repo_full_name}")
+        else:
+            print(f"      gh secret set SECURITY_BASELINE -b \"$(cat /tmp/baseline-compressed.txt)\" --repo YOUR_ORG/YOUR_REPO")
+        print(f"")
+        print(f"   3. Verify the secret was set:")
+        print(f"")
+        if is_git_repo:
+            print(f"      gh secret list --repo {repo_full_name}")
+        else:
+            print(f"      gh secret list --repo YOUR_ORG/YOUR_REPO")
+        print(f"")
+        print(f"   4. Re-run security scan to verify acknowledgments:")
+        print(f"")
+        print(f"      gh workflow run security-full-scan.yml")
+        print(f"")
+        if is_git_repo:
+            print(f"   5. Review changes (optional):")
+            print(f"")
+            print(f"      git diff {self.baseline_path}")
+            print(f"")
+            print(f"   6. Clean up temporary file:")
+            print(f"")
+            print(f"      rm {self.baseline_path}")
+        else:
+            print(f"   5. Clean up temporary file:")
+            print(f"")
+            print(f"      rm {self.baseline_path}")
+        print(f"")
+        print(f"   ⚠️  NOTE: Do NOT commit {self.baseline_path} to git!")
+        print(f"   The baseline should only exist in GitHub Secrets")
+        print(f"")
 
     def run_interactive(self, tool_filter: Optional[str] = None) -> None:
         """Run interactive acknowledgment workflow"""

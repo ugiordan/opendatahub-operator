@@ -54,52 +54,42 @@ class SecurityReportGenerator:
         ]}
 
     def load_baseline(self) -> None:
-        """Load acknowledged findings baseline from security-baseline.yaml or .security-baseline.json
+        """Load acknowledged findings baseline from GitHub Secrets (mandatory)
 
         This filters out findings that teams have acknowledged as false positives
-        or accepted risks. The baseline file contains detailed justifications.
+        or accepted risks. The baseline contains detailed justifications.
 
-        Tries in order:
-        1. .github/config/security-baseline.yaml (v2.0 - preferred)
-        2. .security-baseline.json (v2.0 - backward compat)
+        Requires:
+            SECURITY_BASELINE environment variable (loaded from GitHub Secrets by workflow)
+
+        Raises:
+            SystemExit: If SECURITY_BASELINE environment variable is not set
         """
         # Reset baseline counts for this scan (already initialized in __init__)
         for tool in self.baseline_counts:
             self.baseline_counts[tool] = 0
 
-        # Try YAML baseline first (preferred format)
-        yaml_baseline_path = self.workspace / '.github' / 'config' / 'security-baseline.yaml'
-        json_baseline_path = self.workspace / '.security-baseline.json'
+        # Check for SECURITY_BASELINE environment variable (mandatory)
+        baseline_yaml_str = os.getenv('SECURITY_BASELINE')
+        if not baseline_yaml_str:
+            print(f"[ERROR] SECURITY_BASELINE environment variable not set", file=sys.stderr)
+            print(f"[ERROR] Baseline must be loaded from GitHub Secrets via workflow", file=sys.stderr)
+            print(f"[ERROR] ", file=sys.stderr)
+            print(f"[ERROR] This should have been set by the 'Load baseline from GitHub Secret' step", file=sys.stderr)
+            print(f"[ERROR] Check workflow logs for baseline loading failures", file=sys.stderr)
+            sys.exit(1)
 
-        baseline_data = None
-        baseline_file_used = None
+        # Parse baseline from environment variable
+        try:
+            baseline_data = yaml.safe_load(baseline_yaml_str)
+            print(f"[INFO] Loaded baseline from GitHub Secret (SECURITY_BASELINE env var)", file=sys.stderr)
+        except Exception as e:
+            print(f"[ERROR] Failed to parse baseline from env var: {str(e)}", file=sys.stderr)
+            print(f"[ERROR] Baseline YAML is invalid", file=sys.stderr)
+            sys.exit(1)
 
-        # Try YAML format first
-        if yaml_baseline_path.exists():
-            try:
-                with open(yaml_baseline_path) as f:
-                    baseline_data = yaml.safe_load(f)
-                baseline_file_used = yaml_baseline_path
-            except Exception as e:
-                print(f"[ERROR] Failed to load YAML baseline: {str(e)}", file=sys.stderr)
-
-        # Fall back to JSON format
-        if baseline_data is None and json_baseline_path.exists():
-            try:
-                with open(json_baseline_path) as f:
-                    baseline_data = json.load(f)
-                baseline_file_used = json_baseline_path
-            except Exception as e:
-                print(f"[ERROR] Failed to load JSON baseline: {str(e)}", file=sys.stderr)
-
-        # No baseline file found
         if baseline_data is None:
-            return  # All findings will be reported
-
-        # Validate baseline is a dictionary
-        if not isinstance(baseline_data, dict):
-            print(f"[ERROR] Baseline file has invalid structure (expected dict, got {type(baseline_data).__name__})", file=sys.stderr)
-            print(f"[ERROR] Ignoring baseline - all findings will be reported", file=sys.stderr)
+            print(f"[INFO] Baseline is empty - all findings will be reported", file=sys.stderr)
             return
 
         # Validate baseline version
@@ -110,8 +100,6 @@ class SecurityReportGenerator:
         # Store baseline data for each tool
         for tool in self.baseline_counts:
             self.baseline[tool] = baseline_data.get(tool, [])
-
-        print(f"[INFO] Loaded baseline from {baseline_file_used}", file=sys.stderr)
 
     def _is_acknowledged(self, tool: str, finding: Dict[str, Any]) -> bool:
         """Check if a finding matches an acknowledged baseline entry
@@ -169,13 +157,13 @@ class SecurityReportGenerator:
             elif tool == 'actionlint':
                 if (finding.get('file') == baseline_entry.get('file') and
                     str(finding.get('line')) == str(baseline_entry.get('line')) and
-                    finding.get('description') == baseline_entry.get('message')):
+                    finding.get('message') == baseline_entry.get('message')):
                     return True
 
             elif tool == 'kube-linter':
                 # kube-linter uses object kind/name/namespace + check name
                 obj = baseline_entry.get('object', {})
-                if (finding.get('rule') == baseline_entry.get('check') and
+                if (finding.get('check') == baseline_entry.get('check') and
                     finding.get('object_kind') == obj.get('kind') and
                     finding.get('object_name') == obj.get('name') and
                     finding.get('object_namespace') == obj.get('namespace')):
@@ -559,9 +547,7 @@ class SecurityReportGenerator:
 
                 # Extract object information
                 # kube-linter v0.7.6+ structure has K8sObjectInfo fields under Object.K8sObject
-                # Fallback: if K8sObject doesn't exist, use Object directly for forward compatibility
-                obj_container = report.get('Object', {})
-                obj = obj_container.get('K8sObject', obj_container)
+                obj = report.get('Object', {}).get('K8sObject', {})
                 namespace = obj.get('Namespace', '')
                 name = obj.get('Name', 'unknown')
                 gvk = obj.get('GroupVersionKind', {})
@@ -581,14 +567,14 @@ class SecurityReportGenerator:
 
                 # Map check severity (kube-linter doesn't provide severity in JSON)
                 # Critical: cluster-admin, privileged containers, host access
-                # High: RBAC wildcards, secret access, missing probes
-                # Medium: resource limits, namespace issues
-                # Low: image tags, best practices
+                # Critical: Active privilege escalation, container escape, cluster-admin access
+                # High: RBAC wildcards, secret access, sensitive mounts
+                # Medium: Security best practices (missing configs, hardening)
+                # Low: Image tags, general best practices
                 critical_checks = {
                     'cluster-admin-role-binding', 'privileged-container',
                     'host-network', 'host-pid', 'host-ipc', 'docker-sock',
-                    'access-to-create-pods', 'privilege-escalation-container',
-                    'run-as-non-root', 'no-read-only-root-fs', 'privileged-ports'
+                    'access-to-create-pods', 'privilege-escalation-container'
                 }
                 high_checks = {
                     'access-to-secrets', 'wildcard-in-rules', 'sensitive-host-mounts',
@@ -600,7 +586,8 @@ class SecurityReportGenerator:
                 medium_checks = {
                     'no-liveness-probe', 'no-readiness-probe',
                     'unset-cpu-requirements', 'unset-memory-requirements',
-                    'use-namespace', 'non-existent-service-account'
+                    'use-namespace', 'non-existent-service-account',
+                    'run-as-non-root', 'no-read-only-root-fs', 'privileged-ports'
                 }
 
                 if check_name in critical_checks:
@@ -622,7 +609,8 @@ class SecurityReportGenerator:
                     'severity': severity,
                     'file': object_id,  # Use object ID as "file" for display
                     'line': check_name,  # Use check name as "line" for display
-                    'rule': check_name,
+                    'check': check_name,  # For baseline matching (matches acknowledge-findings.py)
+                    'rule': check_name,  # For report display (expected by report template)
                     'description': f"{message} (Object: {object_id})",
                     'remediation': description or 'Fix Kubernetes manifest according to check requirements',
                     # For baseline matching
@@ -868,7 +856,7 @@ class SecurityReportGenerator:
                     'file': file_path,
                     'line': int(line_num),
                     'rule': rule or 'workflow-syntax',
-                    'description': message,
+                    'message': message,  # Use 'message' to match acknowledge-findings.py
                     'remediation': 'Fix GitHub Actions workflow syntax according to actionlint recommendation'
                 }
 
@@ -903,6 +891,446 @@ class SecurityReportGenerator:
         }
         return remediations.get(rule_id, 'Follow security best practices for this finding')
 
+    def _calculate_risk_score(self, finding: Dict[str, Any]) -> int:
+        """Calculate risk score (0-100) based on severity, exploitability, blast radius, and verification
+
+        Formula: (Severity × Exploitability × Blast Radius × Verification) / 180 * 100
+        - Severity: Critical=10, High=7, Medium=4, Low=2
+        - Exploitability: Easy=3, Medium=2, Hard=1
+        - Blast Radius: Wide=3, Medium=2, Narrow=1
+        - Verification: Verified=2, Unverified=1
+        """
+        # Severity score
+        severity_scores = {
+            'CRITICAL': 10,
+            'HIGH': 7,
+            'MEDIUM': 4,
+            'LOW': 2,
+            'INFO': 1
+        }
+        severity_score = severity_scores.get(finding.get('severity', 'LOW'), 2)
+
+        # Exploitability score (based on finding type and tool)
+        tool = finding.get('tool', '')
+        rule = finding.get('rule', '').lower()
+
+        # Critical secrets are easy to exploit (especially if repo is public)
+        if tool in ['Gitleaks', 'TruffleHog']:
+            exploitability = 3  # Easy - just copy/paste the secret
+        # SQL/Command injection are easy to exploit
+        elif 'sql' in rule or 'injection' in rule or 'command' in rule:
+            exploitability = 3  # Easy - send malicious input
+        # RBAC/privilege escalation requires cluster access
+        elif 'rbac' in rule or 'wildcard' in rule or 'privilege' in rule:
+            exploitability = 2  # Medium - need initial access
+        # TLS/crypto issues require man-in-the-middle
+        elif 'tls' in rule or 'ssl' in rule or 'crypto' in rule:
+            exploitability = 2  # Medium - need network position
+        # Container security issues (privileged, host-network)
+        elif 'privileged' in rule or 'host-network' in rule or 'host-pid' in rule:
+            exploitability = 2  # Medium - need pod deployment access
+        # Most infrastructure issues are moderately exploitable
+        elif tool in ['kube-linter', 'Hadolint', 'Semgrep']:
+            exploitability = 2  # Medium
+        # Code quality and configuration issues are harder to exploit
+        else:
+            exploitability = 1  # Hard - requires specific conditions
+
+        # Blast radius (impact scope)
+        # Verified secrets and cluster-admin have widest blast radius
+        if tool == 'TruffleHog' or 'cluster-admin' in rule:
+            blast_radius = 3  # Wide - full system/account access
+        # Hardcoded secrets can access entire services
+        elif tool == 'Gitleaks':
+            blast_radius = 3  # Wide - depends on secret scope
+        # SQL/Command injection can compromise entire application
+        elif 'sql' in rule or 'injection' in rule or 'command' in rule:
+            blast_radius = 3  # Wide - full application compromise
+        # RBAC wildcards and privilege escalation
+        elif tool == 'RBAC Analyzer' or 'wildcard' in rule or 'privilege' in rule:
+            blast_radius = 3  # Wide - can escalate to full cluster access
+        # Container escape (privileged, host access)
+        elif 'privileged' in rule or 'host-network' in rule or 'host-pid' in rule:
+            blast_radius = 2  # Medium - node access, potential cluster spread
+        # Infrastructure misconfigurations
+        elif tool in ['kube-linter', 'Hadolint']:
+            blast_radius = 2  # Medium - workload or container scope
+        # Configuration and code quality issues
+        else:
+            blast_radius = 1  # Narrow - limited impact
+
+        # Verification status (TruffleHog verified = 2, everything else = 1)
+        verification = 2 if tool == 'TruffleHog' else 1
+
+        # Calculate final score (0-100 scale)
+        raw_score = severity_score * exploitability * blast_radius * verification
+        # Max possible: 10 * 3 * 3 * 2 = 180
+        normalized_score = min(100, int((raw_score / 180.0) * 100))
+
+        return normalized_score
+
+    def _generate_attack_scenario(self, finding: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate attack scenario for critical/high findings
+
+        Returns dict with:
+        - attack_steps: List of exploitation steps
+        - prerequisites: What attacker needs
+        - impact: Business/technical impact
+        - exploitability: EASY/MEDIUM/HARD
+        """
+        tool = finding.get('tool', '')
+        rule = finding.get('rule', '')
+        severity = finding.get('severity', '')
+
+        scenario = {
+            'attack_steps': [],
+            'prerequisites': [],
+            'impact': [],
+            'exploitability': 'MEDIUM'
+        }
+
+        # Gitleaks - Hardcoded secrets
+        if tool == 'Gitleaks':
+            scenario['attack_steps'] = [
+                f"Attacker gains read access to repository (public repo or compromised credentials)",
+                f"Extracts hardcoded secret from {finding.get('file', 'file')}:{finding.get('line', '?')}",
+                "Uses secret to authenticate to target system",
+                "Escalates privileges or exfiltrates data depending on secret scope"
+            ]
+            scenario['prerequisites'] = [
+                "Repository read access (public repo = anyone)",
+                "OR: Git history access (secret may persist in history)"
+            ]
+            scenario['impact'] = [
+                "Unauthorized access to systems/services",
+                "Data exfiltration or modification",
+                "Compliance violation (secrets in version control)",
+                "Reputation damage if publicly exposed"
+            ]
+            scenario['exploitability'] = 'EASY'
+
+        # TruffleHog - Verified credentials
+        elif tool == 'TruffleHog':
+            detector = finding.get('detector', 'Unknown service')
+            scenario['attack_steps'] = [
+                f"Attacker gains read access to repository",
+                f"Extracts VERIFIED {detector} credential from {finding.get('file', 'file')}:{finding.get('line', '?')}",
+                f"Immediately uses credential (already verified as ACTIVE)",
+                f"Full access to {detector} account/resources",
+                "Lateral movement to connected systems"
+            ]
+            scenario['prerequisites'] = [
+                "Repository read access",
+                "Credential is VERIFIED (actively working)"
+            ]
+            scenario['impact'] = [
+                f"CRITICAL: Full access to {detector} account",
+                "Data breach of all accessible resources",
+                "Financial impact (unauthorized resource usage)",
+                "Compliance violations (data protection regulations)",
+                "Immediate security incident requiring disclosure"
+            ]
+            scenario['exploitability'] = 'EASY'
+
+        # RBAC Analyzer - Privilege escalation
+        elif tool == 'RBAC Analyzer':
+            scenario['attack_steps'] = [
+                "Attacker compromises a low-privilege service account or pod",
+                f"Exploits RBAC chain: {finding.get('title', 'privilege escalation path')}",
+                "Escalates to cluster-admin or high-privilege role",
+                "Full cluster control achieved"
+            ]
+            scenario['prerequisites'] = [
+                "Initial access to Kubernetes cluster",
+                "Compromised pod or service account",
+                "RBAC misconfiguration allows privilege escalation"
+            ]
+            scenario['impact'] = [
+                "Full cluster compromise",
+                "Access to all secrets and workloads",
+                "Data exfiltration across namespaces",
+                "Persistent backdoor installation",
+                "Cryptocurrency mining or ransomware deployment"
+            ]
+            scenario['exploitability'] = 'MEDIUM'
+
+        # kube-linter - Kubernetes security issues
+        elif tool == 'kube-linter':
+            if 'cluster-admin' in rule.lower():
+                scenario['attack_steps'] = [
+                    "Attacker compromises service account with cluster-admin binding",
+                    "Full cluster access immediately granted",
+                    "Creates backdoor admin accounts",
+                    "Deploys malicious workloads"
+                ]
+                scenario['exploitability'] = 'EASY'
+            elif 'wildcard' in rule.lower():
+                scenario['attack_steps'] = [
+                    "Attacker compromises service account with wildcard permissions",
+                    "Exploits overly broad access to resources",
+                    "Accesses secrets or escalates privileges",
+                    "Lateral movement across namespaces"
+                ]
+                scenario['exploitability'] = 'MEDIUM'
+            elif 'privileged' in rule.lower():
+                scenario['attack_steps'] = [
+                    "Attacker gains code execution in privileged container",
+                    "Escapes container to host system",
+                    "Full node compromise",
+                    "Pivots to other nodes in cluster"
+                ]
+                scenario['exploitability'] = 'MEDIUM'
+            else:
+                scenario['attack_steps'] = [
+                    "Attacker exploits Kubernetes misconfiguration",
+                    "Gains elevated access or escapes isolation",
+                    "Compromises workload or data"
+                ]
+                scenario['exploitability'] = 'MEDIUM'
+
+            scenario['prerequisites'] = [
+                "Access to Kubernetes cluster",
+                "Ability to deploy or modify resources",
+                f"Kubernetes object exists: {finding.get('file', 'unknown')}"
+            ]
+            scenario['impact'] = [
+                "Container escape or privilege escalation",
+                "Access to node resources",
+                "Potential cluster-wide compromise",
+                "Data exfiltration"
+            ]
+
+        # Semgrep - Code security issues
+        elif tool == 'Semgrep':
+            if 'sql-injection' in rule.lower():
+                scenario['attack_steps'] = [
+                    "Attacker sends malicious SQL in user input",
+                    "Application executes unvalidated query",
+                    "Database compromise via SQL injection",
+                    "Data exfiltration or modification"
+                ]
+                scenario['exploitability'] = 'EASY'
+            elif 'command-injection' in rule.lower():
+                scenario['attack_steps'] = [
+                    "Attacker injects shell commands in user input",
+                    "Application executes commands on server",
+                    "Remote code execution achieved",
+                    "Server takeover"
+                ]
+                scenario['exploitability'] = 'EASY'
+            elif 'tls' in rule.lower() or 'insecure' in rule.lower():
+                scenario['attack_steps'] = [
+                    "Attacker performs man-in-the-middle attack",
+                    "Insecure TLS configuration allows interception",
+                    "Sensitive data captured in transit",
+                    "Credentials or tokens stolen"
+                ]
+                scenario['exploitability'] = 'MEDIUM'
+            else:
+                scenario['attack_steps'] = [
+                    "Attacker exploits code vulnerability",
+                    "Gains unauthorized access or elevation",
+                    "Compromises application security"
+                ]
+                scenario['exploitability'] = 'MEDIUM'
+
+            scenario['prerequisites'] = [
+                "Access to application endpoint",
+                "Ability to provide malicious input",
+                f"Vulnerable code at {finding.get('file', 'file')}:{finding.get('line', '?')}"
+            ]
+            scenario['impact'] = [
+                "Application compromise",
+                "Data breach or corruption",
+                "Unauthorized access",
+                "Potential system takeover"
+            ]
+
+        # Default scenario for other tools
+        else:
+            scenario['attack_steps'] = [
+                "Attacker identifies security misconfiguration",
+                "Exploits weakness to gain unauthorized access",
+                "Compromises security posture"
+            ]
+            scenario['prerequisites'] = [
+                f"Access to affected system/component",
+                f"Vulnerability at {finding.get('file', 'file')}:{finding.get('line', '?')}"
+            ]
+            scenario['impact'] = [
+                "Security control bypass",
+                "Potential unauthorized access",
+                "Weakened security posture"
+            ]
+            scenario['exploitability'] = 'MEDIUM'
+
+        return scenario
+
+    def _map_compliance_frameworks(self, finding: Dict[str, Any]) -> List[Dict[str, str]]:
+        """Map finding to compliance framework controls
+
+        Frameworks selected for infrastructure/platform security:
+        - SOC2: Service Organization Control 2 (Trust Services Criteria for cloud platforms)
+        - ISO27001: Information Security Management System (international standard)
+
+        Note: GDPR/PCI-DSS removed as they're not applicable to infrastructure platform code.
+        GDPR is for personal data protection (relevant for applications built on RHOAI, not RHOAI itself).
+        PCI-DSS is for payment card processing (not applicable to AI/ML platform).
+
+        Returns list of dicts with:
+        - framework: SOC2, ISO27001
+        - control: Specific control number/name
+        - description: What the control requires
+        """
+        tool = finding.get('tool', '')
+        rule = finding.get('rule', '').lower()
+        mappings = []
+
+        # Hardcoded secrets (Gitleaks, TruffleHog)
+        if tool in ['Gitleaks', 'TruffleHog']:
+            mappings.extend([
+                {
+                    'framework': 'SOC2',
+                    'control': 'CC6.1',
+                    'description': 'Logical and physical access controls restrict access to sensitive information'
+                },
+                {
+                    'framework': 'ISO27001',
+                    'control': 'A.9.4.1',
+                    'description': 'Information access restriction - credentials must not be stored in code'
+                }
+            ])
+
+        # RBAC issues
+        if tool == 'RBAC Analyzer' or 'rbac' in rule or 'wildcard' in rule:
+            mappings.extend([
+                {
+                    'framework': 'SOC2',
+                    'control': 'CC6.2',
+                    'description': 'Prior to issuing system credentials, the entity registers and authorizes new users'
+                },
+                {
+                    'framework': 'ISO27001',
+                    'control': 'A.9.2.3',
+                    'description': 'Management of privileged access rights'
+                }
+            ])
+
+        # Privileged containers, insecure configurations
+        if 'privileged' in rule or 'host-network' in rule or 'root' in rule:
+            mappings.extend([
+                {
+                    'framework': 'SOC2',
+                    'control': 'CC6.6',
+                    'description': 'Logical and physical access controls restrict access'
+                },
+                {
+                    'framework': 'ISO27001',
+                    'control': 'A.12.6.1',
+                    'description': 'Management of technical vulnerabilities'
+                }
+            ])
+
+        # TLS/encryption issues
+        if 'tls' in rule or 'insecure' in rule or 'crypto' in rule:
+            mappings.extend([
+                {
+                    'framework': 'SOC2',
+                    'control': 'CC6.7',
+                    'description': 'Entity transmits and stores data using encryption'
+                },
+                {
+                    'framework': 'ISO27001',
+                    'control': 'A.10.1.1',
+                    'description': 'Policy on the use of cryptographic controls'
+                }
+            ])
+
+        # If no specific mappings, add generic security control mapping
+        if not mappings and finding.get('severity') in ['CRITICAL', 'HIGH']:
+            mappings.append({
+                'framework': 'SOC2',
+                'control': 'CC6.1',
+                'description': 'Logical and physical access controls'
+            })
+            mappings.append({
+                'framework': 'ISO27001',
+                'control': 'A.12.6.1',
+                'description': 'Management of technical vulnerabilities'
+            })
+
+        return mappings
+
+    def _map_owasp_cwe(self, finding: Dict[str, Any]) -> Dict[str, Any]:
+        """Map finding to OWASP Top 10 and CWE
+
+        Returns dict with:
+        - owasp: OWASP Top 10 2021 category
+        - cwe: CWE number and description
+        - cvss: CVSS 3.1 score (if applicable)
+        """
+        tool = finding.get('tool', '')
+        rule = finding.get('rule', '').lower()
+        severity = finding.get('severity', '')
+
+        mapping = {
+            'owasp': None,
+            'cwe': None,
+            'cvss': None
+        }
+
+        # Hardcoded credentials
+        if tool in ['Gitleaks', 'TruffleHog']:
+            mapping['owasp'] = 'A07:2021 - Identification and Authentication Failures'
+            mapping['cwe'] = 'CWE-798: Use of Hard-coded Credentials'
+            if severity == 'CRITICAL':
+                mapping['cvss'] = '9.8 (Critical) - AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H'
+
+        # SQL Injection
+        elif 'sql-injection' in rule or 'sql' in rule:
+            mapping['owasp'] = 'A03:2021 - Injection'
+            mapping['cwe'] = 'CWE-89: SQL Injection'
+            mapping['cvss'] = '9.8 (Critical) - AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H'
+
+        # Command Injection
+        elif 'command-injection' in rule or 'shell-injection' in rule:
+            mapping['owasp'] = 'A03:2021 - Injection'
+            mapping['cwe'] = 'CWE-78: OS Command Injection'
+            mapping['cvss'] = '9.8 (Critical) - AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H'
+
+        # Insecure TLS
+        elif 'tls' in rule or 'ssl' in rule or 'insecure' in rule:
+            mapping['owasp'] = 'A02:2021 - Cryptographic Failures'
+            mapping['cwe'] = 'CWE-295: Improper Certificate Validation'
+            mapping['cvss'] = '7.4 (High) - AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N'
+
+        # Weak Cryptography
+        elif 'crypto' in rule or 'md5' in rule or 'sha1' in rule:
+            mapping['owasp'] = 'A02:2021 - Cryptographic Failures'
+            mapping['cwe'] = 'CWE-327: Use of a Broken or Risky Cryptographic Algorithm'
+            mapping['cvss'] = '7.5 (High) - AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N'
+
+        # Access Control (RBAC wildcards, privilege escalation)
+        elif 'rbac' in rule or 'wildcard' in rule or 'privilege' in rule or tool == 'RBAC Analyzer':
+            mapping['owasp'] = 'A01:2021 - Broken Access Control'
+            mapping['cwe'] = 'CWE-269: Improper Privilege Management'
+            if severity == 'CRITICAL':
+                mapping['cvss'] = '8.8 (High) - AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H'
+            else:
+                mapping['cvss'] = '6.5 (Medium) - AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N'
+
+        # Security Misconfiguration
+        elif tool in ['kube-linter', 'Hadolint'] or 'config' in rule:
+            mapping['owasp'] = 'A05:2021 - Security Misconfiguration'
+            mapping['cwe'] = 'CWE-16: Configuration'
+
+        # Default for unmatched
+        else:
+            mapping['owasp'] = 'A05:2021 - Security Misconfiguration'
+            mapping['cwe'] = 'CWE-1004: Sensitive Cookie Without HttpOnly Flag'
+
+        return mapping
+
     def generate_report(self, output_file: str, json_summary_file: Optional[str] = None, yamllint_report_file: Optional[str] = None):
         """Generate comprehensive markdown security report, optional JSON summary, and optional yamllint report"""
 
@@ -919,6 +1347,11 @@ class SecurityReportGenerator:
         self.tool_stats['actionlint'] = self.parse_actionlint(f'{self.workspace}/actionlint.txt')
         self.tool_stats['kube-linter'] = self.parse_kubelinter(f'{self.workspace}/kube-linter.json')
         self.tool_stats['rbac'] = self.parse_rbac_analyzer(f'{self.workspace}/rbac-analysis.md')
+
+        # Calculate risk scores for all findings
+        for severity in ['critical', 'high', 'medium', 'low', 'info']:
+            for finding in self.findings[severity]:
+                finding['risk_score'] = self._calculate_risk_score(finding)
 
         # Calculate totals
         total_findings = sum(len(findings) for findings in self.findings.values())
@@ -1002,28 +1435,171 @@ class SecurityReportGenerator:
                 f.write(f"| {self.tool_stats['rbac']['tool']} | RBAC privilege chain analysis | {self.tool_stats['rbac']['status']} | {self.tool_stats['rbac']['findings']} |\n\n")
                 f.write(f"---\n\n")
 
-                # Critical Findings
-                if self.findings['critical']:
-                    f.write(f"## Critical Findings ({len(self.findings['critical'])})\n\n")
-                    f.write(f"**IMMEDIATE ACTION REQUIRED**\n\n")
-                    for i, finding in enumerate(self.findings['critical'], 1):
-                        f.write(f"### {i}. {finding['type']} ({finding['tool']})\n\n")
-                        f.write(f"- **File:** `{finding['file']}:{finding['line']}`\n")
-                        f.write(f"- **Rule:** {finding['rule']}\n")
-                        f.write(f"- **Description:** {finding['description']}\n")
-                        f.write(f"- **Remediation:** {finding['remediation']}\n\n")
+                # Quick Wins section (high impact, low effort fixes)
+                if critical_count > 0 or high_count > 0:
+                    f.write(f"## 🎯 Quick Wins (High Impact, Low Effort)\n\n")
+                    f.write(f"These findings are relatively easy to fix but provide significant security improvements:\n\n")
+
+                    # Collect all critical/high findings with risk scores
+                    quick_win_candidates = []
+                    for finding in self.findings['critical'] + self.findings['high']:
+                        # Determine effort level based on finding type
+                        effort = 'MEDIUM'
+                        tool = finding.get('tool', '')
+                        rule = finding.get('rule', '').lower()
+
+                        # Low effort fixes
+                        if tool in ['Gitleaks', 'TruffleHog']:
+                            effort = 'LOW'  # Remove hardcoded secret = 5-10 min
+                        elif 'privileged' in rule or 'root' in rule:
+                            effort = 'LOW'  # Change Dockerfile/manifest = 5 min
+                        elif tool == 'Hadolint':
+                            effort = 'LOW'  # Fix Dockerfile best practice = 2-5 min
+                        elif 'wildcard' in rule and tool in ['kube-linter', 'Semgrep']:
+                            effort = 'MEDIUM'  # Replace wildcard = 15-30 min
+                        else:
+                            effort = 'MEDIUM'
+
+                        # Quick wins are high risk score + low effort
+                        if effort == 'LOW' and finding.get('risk_score', 0) >= 60:
+                            quick_win_candidates.append({
+                                'finding': finding,
+                                'effort': effort,
+                                'risk_score': finding.get('risk_score', 0)
+                            })
+
+                    # Sort by risk score (highest first)
+                    quick_win_candidates.sort(key=lambda x: x['risk_score'], reverse=True)
+
+                    # Show top 5 quick wins
+                    if quick_win_candidates:
+                        for i, qw in enumerate(quick_win_candidates[:5], 1):
+                            finding = qw['finding']
+                            f.write(f"{i}. **[Risk: {finding.get('risk_score', 0)}/100]** ")
+                            f.write(f"{finding['type']} in `{finding['file']}:{finding['line']}`\n")
+                            f.write(f"   - **Fix:** {finding['remediation']}\n")
+                            f.write(f"   - **Impact:** Eliminates {finding['severity'].lower()}-severity vulnerability\n")
+                            f.write(f"   - **Effort:** 5-10 minutes\n\n")
+                    else:
+                        f.write(f"*No quick wins identified. All critical/high findings require moderate effort.*\n\n")
+
                     f.write(f"---\n\n")
 
-                # High Findings
+                # Critical Findings (Enhanced with attack scenarios)
+                if self.findings['critical']:
+                    f.write(f"## ⚠️ Critical Findings ({len(self.findings['critical'])})\n\n")
+                    f.write(f"**IMMEDIATE ACTION REQUIRED - These vulnerabilities pose severe security risks**\n\n")
+                    for i, finding in enumerate(self.findings['critical'], 1):
+                        f.write(f"### Finding #{i}: {finding['type']}\n\n")
+                        f.write(f"**Severity:** CRITICAL | **Risk Score:** {finding.get('risk_score', 0)}/100\n\n")
+                        f.write(f"**Tool:** {finding['tool']} | **Rule:** {finding['rule']}\n\n")
+
+                        # Location
+                        f.write(f"**Location:** `{finding['file']}:{finding['line']}`\n\n")
+
+                        # Description
+                        f.write(f"**Description:** {finding['description']}\n\n")
+
+                        # Attack Scenario
+                        scenario = self._generate_attack_scenario(finding)
+                        f.write(f"#### 🎯 Attack Scenario\n\n")
+                        f.write(f"**How an attacker could exploit this:**\n\n")
+                        for step_num, step in enumerate(scenario['attack_steps'], 1):
+                            f.write(f"{step_num}. {step}\n")
+                        f.write(f"\n")
+
+                        f.write(f"**Prerequisites for Exploitation:**\n")
+                        for prereq in scenario['prerequisites']:
+                            f.write(f"- {prereq}\n")
+                        f.write(f"\n")
+
+                        f.write(f"**Potential Impact:**\n")
+                        for impact in scenario['impact']:
+                            f.write(f"- {impact}\n")
+                        f.write(f"\n")
+
+                        f.write(f"**Exploitability:** {scenario['exploitability']}\n\n")
+
+                        # Compliance Impact
+                        compliance = self._map_compliance_frameworks(finding)
+                        if compliance:
+                            f.write(f"#### 📋 Compliance Impact\n\n")
+                            for mapping in compliance:
+                                f.write(f"- ❌ **{mapping['framework']}**: {mapping['control']} - {mapping['description']}\n")
+                            f.write(f"\n")
+
+                        # OWASP/CWE Mapping
+                        owasp_cwe = self._map_owasp_cwe(finding)
+                        if owasp_cwe['owasp'] or owasp_cwe['cwe']:
+                            f.write(f"#### 🔍 Security Classification\n\n")
+                            if owasp_cwe['owasp']:
+                                f.write(f"- **OWASP Top 10 2021:** {owasp_cwe['owasp']}\n")
+                            if owasp_cwe['cwe']:
+                                f.write(f"- **CWE:** {owasp_cwe['cwe']}\n")
+                            if owasp_cwe['cvss']:
+                                f.write(f"- **CVSS Score:** {owasp_cwe['cvss']}\n")
+                            f.write(f"\n")
+
+                        # Remediation
+                        f.write(f"#### 🔧 Remediation\n\n")
+                        f.write(f"**Immediate Action Required:**\n\n")
+                        f.write(f"{finding['remediation']}\n\n")
+
+                        f.write(f"---\n\n")
+
+                    f.write(f"\n")
+
+                # High Findings (Enhanced with attack scenarios)
                 if self.findings['high']:
-                    f.write(f"## High-Severity Findings ({len(self.findings['high'])})\n\n")
+                    f.write(f"## 🔴 High-Severity Findings ({len(self.findings['high'])})\n\n")
+                    f.write(f"**High priority - Address within 7 days**\n\n")
                     for i, finding in enumerate(self.findings['high'], 1):
-                        f.write(f"### {i}. {finding['type']} ({finding['tool']})\n\n")
-                        f.write(f"- **File:** `{finding['file']}:{finding['line']}`\n")
-                        f.write(f"- **Rule:** {finding['rule']}\n")
-                        f.write(f"- **Description:** {finding['description']}\n")
-                        f.write(f"- **Remediation:** {finding['remediation']}\n\n")
-                    f.write(f"---\n\n")
+                        f.write(f"### Finding #{i}: {finding['type']}\n\n")
+                        f.write(f"**Severity:** HIGH | **Risk Score:** {finding.get('risk_score', 0)}/100\n\n")
+                        f.write(f"**Tool:** {finding['tool']} | **Rule:** {finding['rule']}\n\n")
+
+                        # Location
+                        f.write(f"**Location:** `{finding['file']}:{finding['line']}`\n\n")
+
+                        # Description
+                        f.write(f"**Description:** {finding['description']}\n\n")
+
+                        # Attack Scenario (collapsed by default for high findings)
+                        scenario = self._generate_attack_scenario(finding)
+                        f.write(f"<details>\n")
+                        f.write(f"<summary><strong>🎯 Attack Scenario</strong> (click to expand)</summary>\n\n")
+                        f.write(f"**How an attacker could exploit this:**\n\n")
+                        for step_num, step in enumerate(scenario['attack_steps'], 1):
+                            f.write(f"{step_num}. {step}\n")
+                        f.write(f"\n")
+
+                        f.write(f"**Prerequisites:** ")
+                        f.write(f"{', '.join(scenario['prerequisites'])}\n\n")
+
+                        f.write(f"**Impact:** ")
+                        f.write(f"{', '.join(scenario['impact'])}\n\n")
+
+                        f.write(f"**Exploitability:** {scenario['exploitability']}\n\n")
+                        f.write(f"</details>\n\n")
+
+                        # Compliance Impact (brief)
+                        compliance = self._map_compliance_frameworks(finding)
+                        if compliance:
+                            f.write(f"**Compliance Impact:** ")
+                            frameworks = [f"{m['framework']} {m['control']}" for m in compliance]
+                            f.write(f"{', '.join(frameworks)}\n\n")
+
+                        # OWASP/CWE (brief)
+                        owasp_cwe = self._map_owasp_cwe(finding)
+                        if owasp_cwe['owasp']:
+                            f.write(f"**OWASP:** {owasp_cwe['owasp']}\n\n")
+
+                        # Remediation
+                        f.write(f"**Remediation:** {finding['remediation']}\n\n")
+
+                        f.write(f"---\n\n")
+
+                    f.write(f"\n")
 
                 # Medium Findings
                 if self.findings['medium']:

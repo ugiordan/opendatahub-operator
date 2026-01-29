@@ -87,6 +87,6 @@ customChecks:
         - ClusterRoleBinding
     params:
       check: |
-        has(object.subjects) && dyn(object.subjects).exists(s, s.kind == "Group" && s.name.startsWith("system:"))
-          ? "ClusterRoleBinding references system group"
+        has(object.subjects) && dyn(object.subjects).exists(s, s.kind == "Group" && s.name.startsWith("system:")) 
+          ? "ClusterRoleBinding references system group" 
           : ""

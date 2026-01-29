@@ -1,9 +1,10 @@
-# Gitleaks path exclusions
+# Gitleaks path exclusions (glob patterns, one per line)
 # Automatically configured to skip test directories and fixtures
 
-paths:
-  - testdata/
-  - tests/
-  - examples/
-  - vendor/
-  - config/monitoring/segment/  # Test fixtures for monitoring integration
+testdata/
+tests/
+**/tests/**
+**/testdata/**
+examples/
+vendor/
+config/monitoring/segment/

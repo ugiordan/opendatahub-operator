@@ -234,11 +234,13 @@ jobs:
             QUAY_NAMESPACE="$SECURITY_QUAY_ORG"
           fi
 
-          # Determine repository name
+          # Determine repository name (use centralized security-scans repo)
+          # All security scan reports go to the same Quay.io repository with different tags
+          # This simplifies permission management (one robot account, one repository)
           if [ -n "$QUAY_REPO" ]; then
             QUAY_REPO_NAME="$QUAY_REPO"
           else
-            QUAY_REPO_NAME="${{ github.event.repository.name }}"
+            QUAY_REPO_NAME="security-scans"  # Centralized repository for all security scans
           fi
 
           # Warn if both secret schemes are configured

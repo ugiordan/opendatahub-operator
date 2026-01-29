@@ -1,5 +1,10 @@
 name: Security Full Codebase Scan
 
+# Version: v2.3.0
+# Last Updated: 2026-01-29
+# Plugin: security-findings-manager
+# Description: Comprehensive security scanning with 9 specialized tools
+
 # This workflow performs comprehensive security scanning on the ENTIRE codebase.
 # Complements CodeRabbit's PR incremental scanning with full repository validation.
 #
@@ -887,8 +892,22 @@ jobs:
           # 2. scan-{repo}-latest - always get most recent
           BASE_URL="quay.io/${QUAY_NAMESPACE}/${QUAY_REPO_NAME}"
 
+          # Temporarily rename .dockerignore to prevent it from filtering security reports
+          # Some repositories have aggressive .dockerignore rules (e.g., **/*.md) that would
+          # exclude security-report.md and other report files from the container build context
+          if [ -f .dockerignore ]; then
+            mv .dockerignore .dockerignore.bak
+            echo "ℹ️  Temporarily renamed .dockerignore to prevent filtering report files"
+          fi
+
           podman build -t "${BASE_URL}:scan-${REPO_NAME}-${DATE_TAG}-${SHORT_SHA}" .
           podman tag "${BASE_URL}:scan-${REPO_NAME}-${DATE_TAG}-${SHORT_SHA}" "${BASE_URL}:scan-${REPO_NAME}-latest"
+
+          # Restore .dockerignore
+          if [ -f .dockerignore.bak ]; then
+            mv .dockerignore.bak .dockerignore
+            echo "✅ Restored .dockerignore"
+          fi
 
           echo "📦 Built container image with tags:"
           echo "   - ${BASE_URL}:scan-${REPO_NAME}-${DATE_TAG}-${SHORT_SHA} (timestamp + commit)"

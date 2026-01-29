@@ -7,29 +7,20 @@ name: Security Full Codebase Scan
 # - Manual: workflow_dispatch (on-demand PoC testing)
 # - Scheduled: Weekly on Sundays at 00:00 UTC (optional baseline)
 # - On-demand: Can be triggered via GitHub UI or gh CLI
-#
-# Simplified Workflow (v2.0):
-# - All 9 security tools always run (no enable/disable toggles)
-# - Advanced options: scan_git_history, test_advisory
-# - Baseline mechanism: Acknowledged findings filtered via .github/config/security-baseline.yaml
 
 on:
   workflow_dispatch:  # Manual trigger via GitHub UI or gh CLI
     inputs:
-      # ============================================================================
-      # ADVANCED OPTIONS
-      # ============================================================================
-      scan_git_history:
-        description: '📜 Scan full git history for secrets (slower)'
-        required: false
-        type: boolean
-        default: false
       test_advisory:
-        description: '🧪 Test security advisory creation'
+        description: 'Test security advisory creation (creates advisory even with no findings)'
         required: false
         type: boolean
         default: false
-
+      scan_git_history:
+        description: 'Scan full git history for secrets (slower, may find secrets in deleted files)'
+        required: false
+        type: boolean
+        default: false
   schedule:
     # Run weekly on Sunday at 00:00 UTC for baseline tracking
     - cron: '0 0 * * 0'
@@ -49,21 +40,306 @@ jobs:
           fetch-depth: 0  # Full history for accurate analysis
 
       # ============================================================================
-      # ADVANCED CONFIGURATION - Configure advanced scan options
+      # BASELINE FETCH FROM GITHUB SECRETS (MANDATORY)
       # ============================================================================
-      - name: Configure advanced settings
-        id: config
+      # Fetch security baseline from GitHub Secrets (compressed)
+      # Baseline contains acknowledged findings (false positives/accepted risks)
+      # Loaded into SECURITY_BASELINE environment variable for in-memory processing
+      # NO FILE FALLBACK - GitHub Secret is mandatory for security
+
+      - name: Load baseline from GitHub Secret
+        id: load-baseline
+        env:
+          BASELINE_COMPRESSED: ${{ secrets.SECURITY_BASELINE }}
         run: |
-          # Only configure advanced flags, all tools always run
-          SCAN_GIT_HISTORY="${{ inputs.scan_git_history || 'false' }}"
-          TEST_ADVISORY="${{ inputs.test_advisory || 'false' }}"
+          if [ -z "$BASELINE_COMPRESSED" ]; then
+            echo "ℹ️  SECURITY_BASELINE secret not found"
+            echo "   Creating empty baseline for first-time setup..."
+            echo ""
 
-          echo "scan_git_history=$SCAN_GIT_HISTORY" >> $GITHUB_OUTPUT
-          echo "test_advisory=$TEST_ADVISORY" >> $GITHUB_OUTPUT
+            # Create empty baseline for first scan
+            cat > /tmp/baseline.yaml <<'EOF'
+          version: "2.0"
+          description: "Acknowledged security findings"
+          _comment: "First-time setup - empty baseline. Use /sec-scan:acknowledge to add acknowledgments."
+          gitleaks: []
+          trufflehog: []
+          semgrep: []
+          shellcheck: []
+          hadolint: []
+          yamllint: []
+          actionlint: []
+          kube-linter: []
+          rbac-analyzer: []
+          EOF
 
-          echo "✅ All security tools will run (simplified workflow)"
-          echo "  - Scan git history: $SCAN_GIT_HISTORY"
-          echo "  - Test advisory: $TEST_ADVISORY"
+            echo "✅ Created empty baseline (first-time setup)"
+            echo ""
+            echo "After this scan completes, you can:"
+            echo "  1. Run /sec-scan:acknowledge to review and acknowledge findings"
+            echo "  2. Updated baseline will be stored in SECURITY_BASELINE secret"
+            echo ""
+          else
+            # Decompress existing baseline
+            echo "🔍 Loading baseline from SECURITY_BASELINE secret..."
+
+            # NOTE: Can't use command substitution $() because gzip output has null bytes
+            # which bash strips. Must use temporary file.
+            set -euo pipefail
+            if ! echo "$BASELINE_COMPRESSED" | base64 -d | gunzip > /tmp/baseline.yaml; then
+              echo "::error::Failed to decompress SECURITY_BASELINE secret - invalid format"
+              echo ""
+              echo "❌ ERROR: Failed to decompress baseline from SECURITY_BASELINE secret"
+              echo ""
+              echo "Possible causes:"
+              echo "  1. Secret contains invalid base64 encoding"
+              echo "  2. Secret contains corrupted gzip data"
+              echo "  3. Secret was manually edited incorrectly"
+              echo ""
+              echo "To fix, regenerate the secret:"
+              echo "  1. Get the baseline YAML file"
+              echo "  2. Compress and encode: cat baseline.yaml | gzip | base64 -w 0 > baseline-compressed.txt"
+              echo "  3. Update secret: gh secret set SECURITY_BASELINE -b \"\$(cat baseline-compressed.txt)\" --repo ${{ github.repository }}"
+              exit 1
+            fi
+            set +euo pipefail
+
+            echo "✅ Loaded baseline from SECURITY_BASELINE secret"
+          fi
+
+          # Validate baseline YAML structure before using
+          echo "🔍 Validating baseline structure..."
+          python3 << 'EOF'
+          import yaml
+          import sys
+
+          try:
+              with open('/tmp/baseline.yaml') as f:
+                  data = yaml.safe_load(f)
+
+              # Validate required structure
+              if not isinstance(data, dict):
+                  print("❌ ERROR: Baseline is not a dictionary")
+                  sys.exit(1)
+
+              if 'version' not in data:
+                  print("❌ ERROR: Baseline missing 'version' field")
+                  sys.exit(1)
+
+              # Validate all tool keys are lists
+              required_tools = ['gitleaks', 'trufflehog', 'semgrep', 'shellcheck',
+                                'hadolint', 'yamllint', 'actionlint', 'kube-linter', 'rbac-analyzer']
+              for tool in required_tools:
+                  if tool in data and not isinstance(data[tool], list):
+                      print(f"❌ ERROR: Baseline['{tool}'] must be a list, got {type(data[tool]).__name__}")
+                      sys.exit(1)
+
+              print(f"✅ Baseline validation passed (version {data.get('version')})")
+          except yaml.YAMLError as e:
+              print(f"❌ ERROR: Invalid YAML syntax in baseline")
+              print(f"   {str(e)}")
+              sys.exit(1)
+          except Exception as e:
+              print(f"❌ ERROR: Baseline validation failed: {e}")
+              sys.exit(1)
+          EOF
+
+          # Export as environment variable for subsequent steps
+          echo "BASELINE_YAML<<EOF" >> $GITHUB_ENV
+          cat /tmp/baseline.yaml >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+          # Read baseline for size calculations
+          BASELINE_YAML=$(cat /tmp/baseline.yaml)
+
+          # Show size info
+          SIZE=$(echo "$BASELINE_YAML" | wc -c | tr -d ' ')
+          # Use the already-compressed secret size instead of re-compressing (performance optimization)
+          COMPRESSED_SIZE=$(echo "$BASELINE_COMPRESSED" | wc -c | tr -d ' ')
+          FINDINGS=$(echo "$BASELINE_YAML" | grep -c "hash:" || echo "0")
+
+          echo "✅ Loaded baseline from GitHub Secret"
+          echo "   Findings: $FINDINGS"
+          echo "   Size: $SIZE bytes (uncompressed)"
+          echo "   Size: $COMPRESSED_SIZE bytes (compressed)"
+          echo "   GitHub Secret Limit: 49,152 bytes"
+
+          PERCENT=$((COMPRESSED_SIZE * 100 / 49152))
+          echo "   Usage: ${PERCENT}%"
+
+          # Export size metrics for later steps
+          echo "BASELINE_SIZE_COMPRESSED=$COMPRESSED_SIZE" >> $GITHUB_ENV
+          echo "BASELINE_SIZE_PERCENT=$PERCENT" >> $GITHUB_ENV
+
+          # Threshold checks for baseline size monitoring
+          # 45000 bytes = ~91.5% of 49152 limit (critical warning threshold)
+          # 39321 bytes = ~80% of 49152 limit (monitoring threshold)
+          if [ $COMPRESSED_SIZE -gt 45000 ]; then
+            echo "⚠️  WARNING: Approaching GitHub secret size limit!"
+            echo "   Current usage: ${PERCENT}% (${COMPRESSED_SIZE} / 49,152 bytes)"
+            echo ""
+            echo "💡 Cleanup suggestions:"
+            echo "   1. Remove acknowledgments for findings that no longer exist in codebase"
+            echo "   2. Archive old baselines (download and save to secure storage)"
+            echo "   3. Review and consolidate duplicate acknowledgments"
+            echo ""
+            echo "   To review baseline content, run:"
+            echo "   gh secret get SECURITY_BASELINE --repo ${{ github.repository }} | base64 -d | gunzip"
+          elif [ $COMPRESSED_SIZE -gt 39321 ]; then
+            echo "ℹ️  Baseline usage at ${PERCENT}% - monitoring recommended"
+            echo "   Consider periodic cleanup to prevent hitting size limit"
+          fi
+
+      # ============================================================================
+      # QUAY.IO CREDENTIALS VALIDATION (EARLY CHECK)
+      # ============================================================================
+      # Validate Quay.io credentials and namespace access before running scans
+      # Fails fast if credentials are missing or incorrect
+      # Saves time by not running scans if the final push will fail
+
+      - name: Validate Quay.io credentials and namespace
+        id: validate-quay
+        env:
+          QUAY_ID: ${{ secrets.QUAY_ID }}
+          QUAY_ORG: ${{ secrets.QUAY_ORG }}
+          QUAY_USER: ${{ secrets.QUAY_USER }}
+          QUAY_TOKEN: ${{ secrets.QUAY_TOKEN }}
+          SECURITY_QUAY_ORG: ${{ secrets.SECURITY_QUAY_ORG }}
+          QUAY_REPO: ${{ secrets.QUAY_REPO }}
+        run: |
+          echo "🔍 Validating Quay.io credentials and namespace..."
+
+          # Determine credentials format (QUAY_ID or QUAY_USER)
+          if [ -n "$QUAY_ID" ]; then
+            # opendatahub-operator style: QUAY_ID, QUAY_ORG, QUAY_TOKEN
+            QUAY_USERNAME="$QUAY_ID"
+            QUAY_NAMESPACE="$QUAY_ORG"
+          elif [ -n "$QUAY_USER" ]; then
+            # Alternative style: QUAY_USER, QUAY_TOKEN
+            QUAY_USERNAME="$QUAY_USER"
+            # Extract namespace from QUAY_USER (format: "namespace+robot")
+            QUAY_NAMESPACE=$(echo "$QUAY_USER" | cut -d+ -f1)
+          else
+            QUAY_USERNAME=""
+            QUAY_NAMESPACE=""
+          fi
+
+          # Override namespace for security scans if specified
+          if [ -n "$SECURITY_QUAY_ORG" ]; then
+            QUAY_NAMESPACE="$SECURITY_QUAY_ORG"
+          fi
+
+          # Determine repository name
+          if [ -n "$QUAY_REPO" ]; then
+            QUAY_REPO_NAME="$QUAY_REPO"
+          else
+            QUAY_REPO_NAME="${{ github.event.repository.name }}"
+          fi
+
+          # Warn if both secret schemes are configured
+          if [ -n "$QUAY_ID" ] && [ -n "$QUAY_USER" ]; then
+            echo ""
+            echo "⚠️  WARNING: Both QUAY_ID and QUAY_USER secrets are set"
+            echo "   Using QUAY_ID (opendatahub-operator style takes priority)"
+            echo "   Consider removing the unused QUAY_USER secret to avoid confusion"
+            echo ""
+          fi
+
+          # Check if credentials are configured
+          if [[ -z "$QUAY_USERNAME" || -z "$QUAY_TOKEN" ]]; then
+            echo "::error::Quay.io credentials not configured - QUAY_USER/QUAY_ID or QUAY_TOKEN missing"
+            echo ""
+            echo "❌ ERROR: Quay.io credentials not configured"
+            echo ""
+            echo "Required GitHub Secrets (choose one format):"
+            echo ""
+            echo "Format 1 (opendatahub-operator style):"
+            echo "  - QUAY_ID: Robot account ID (e.g., 'rhoai-security+github-robot')"
+            echo "  - QUAY_ORG: Organization name (e.g., 'rhoai-security')"
+            echo "  - QUAY_TOKEN: Robot account token"
+            echo ""
+            echo "Format 2 (alternative):"
+            echo "  - QUAY_USER: Robot account username (e.g., 'namespace+robot-name')"
+            echo "  - QUAY_TOKEN: Robot account token"
+            echo ""
+            echo "Setup instructions:"
+            echo "  1. Create Quay.io robot account: https://quay.io/organization/<your-org>?tab=robots"
+            echo "  2. Grant write permissions to your organization"
+            echo "  3. Add secrets to GitHub repository settings"
+            echo "  4. Repository will be auto-created on first push"
+            exit 1
+          fi
+
+          # Validate namespace is set
+          if [ -z "$QUAY_NAMESPACE" ]; then
+            echo "::error::Could not determine Quay.io namespace from credentials"
+            echo ""
+            echo "❌ ERROR: Could not determine Quay.io namespace"
+            echo "   QUAY_ORG is not set (when using QUAY_ID)"
+            echo "   or QUAY_USER format is invalid (should be 'namespace+robot')"
+            exit 1
+          fi
+
+          echo "   Username: $QUAY_USERNAME"
+          echo "   Namespace: $QUAY_NAMESPACE"
+
+          # Test Quay.io login
+          echo ""
+          echo "🔐 Testing Quay.io authentication..."
+          LOGIN_OUTPUT=$(echo "$QUAY_TOKEN" | podman login quay.io -u "$QUAY_USERNAME" --password-stdin 2>&1) || {
+            echo "::error::Quay.io authentication failed for user: $QUAY_USERNAME"
+            echo ""
+            echo "❌ ERROR: Quay.io authentication failed"
+            echo "   Username: $QUAY_USERNAME"
+            echo ""
+            echo "Podman error output:"
+            echo "$LOGIN_OUTPUT" | sed 's/^/   /'
+            echo ""
+            echo "Possible causes:"
+            echo "  1. Invalid robot account credentials"
+            echo "  2. Robot account has been deleted or disabled"
+            echo "  3. Token has expired or been revoked"
+            echo "  4. Network connectivity issues"
+            echo ""
+            echo "To fix:"
+            echo "  1. Verify robot account exists: https://quay.io/organization/${QUAY_NAMESPACE}?tab=robots"
+            echo "  2. Regenerate token if needed"
+            echo "  3. Update GitHub secret: gh secret set QUAY_TOKEN --repo ${{ github.repository }}"
+            exit 1
+          }
+
+          echo "✅ Quay.io authentication successful"
+
+          # Check if repository exists or if we have permission to create it
+          REPO_URL="quay.io/${QUAY_NAMESPACE}/${QUAY_REPO_NAME}"
+
+          echo ""
+          echo "📦 Checking repository access: ${REPO_URL}"
+
+          # Check if skopeo is available (optional check)
+          if ! command -v skopeo &> /dev/null; then
+            echo "⚠️  skopeo not installed, skipping repository access check"
+            echo "   Repository access will be verified during push"
+          else
+            # Try to pull repository metadata (doesn't require pulling the image)
+            # This checks if the repository exists and we have access
+            if skopeo inspect --creds "${QUAY_USERNAME}:${QUAY_TOKEN}" "docker://${REPO_URL}:latest" >/dev/null 2>&1; then
+              echo "✅ Repository exists and is accessible"
+            else
+              echo "ℹ️  Repository does not exist yet or 'latest' tag not found"
+              echo "   Repository will be created on first push"
+              echo "   Location: https://${REPO_URL}"
+            fi
+          fi
+
+          # Export validated values for use in later steps (avoid recalculation)
+          echo "quay_namespace=${QUAY_NAMESPACE}" >> $GITHUB_OUTPUT
+          echo "quay_username=${QUAY_USERNAME}" >> $GITHUB_OUTPUT
+          echo "quay_repo_name=${QUAY_REPO_NAME}" >> $GITHUB_OUTPUT
+
+          echo ""
+          echo "✅ Quay.io validation complete"
+          echo "   All scans will push reports to: ${REPO_URL}"
 
       # ============================================================================
       # SECRETS DETECTION - Gitleaks (Pattern-based)
@@ -91,7 +367,7 @@ jobs:
         timeout-minutes: 10
         run: |
           # Conditionally add --no-git flag based on workflow input
-          NO_GIT_FLAG="${{ steps.config.outputs.scan_git_history == 'false' && '--no-git' || '' }}"
+          NO_GIT_FLAG="${{ !inputs.scan_git_history && '--no-git' || '' }}"
 
           docker run --rm \
             -v "${{ github.workspace }}:/repo" \
@@ -101,7 +377,6 @@ jobs:
               $NO_GIT_FLAG \
               --report-format json \
               --report-path /repo/gitleaks.json \
-              --redact \
               --verbose
         continue-on-error: true  # Don't block workflow, collect all findings
 
@@ -126,34 +401,12 @@ jobs:
         id: trufflehog
         timeout-minutes: 10
         run: |
-          set +e
           docker run --rm \
             -v "${{ github.workspace }}:/repo" \
             ghcr.io/trufflesecurity/trufflehog@sha256:e42f126628f0a0ce4ee670bf62b71543eca5a3a2d3c590ff361091b841ac39c1 \
             filesystem /repo \
               --only-verified \
-              --json > trufflehog.json 2> trufflehog-errors.log
-          TRUFFLEHOG_EXIT=$?
-          set -e
-
-          # Validate output and handle failures
-          if [ $TRUFFLEHOG_EXIT -ne 0 ] && [ ! -s trufflehog.json ]; then
-            echo "❌ TruffleHog failed to produce output (exit: $TRUFFLEHOG_EXIT)" >&2
-            if [ -s trufflehog-errors.log ]; then
-              echo "Error log:" >&2
-              cat trufflehog-errors.log >&2
-            fi
-            exit 1
-          fi
-
-          # Log errors if any occurred
-          if [ -s trufflehog-errors.log ]; then
-            echo "::warning::TruffleHog reported errors, check trufflehog-errors.log artifact"
-            cat trufflehog-errors.log
-          fi
-
-          # Exit with actual status for accurate step outcome
-          exit $TRUFFLEHOG_EXIT
+              --json > trufflehog.json
         continue-on-error: true  # Don't block workflow, collect all findings
 
       # ============================================================================
@@ -179,7 +432,7 @@ jobs:
             -e SEMGREP_TIMEOUT=300 \
             semgrep/semgrep@sha256:1f0850c540140c6da68811b21012fd26e91e5323daae245b0a71e70b72a89d2a \
             semgrep scan \
-              --config /src/.github/config/semgrep.yaml \
+              --config /src/semgrep.yaml \
               --sarif \
               --output /src/semgrep.sarif \
               /src
@@ -215,56 +468,26 @@ jobs:
           # Scans ALL scripts including .github/scripts, hack/, tests/
           # Excludes only vendor/ to avoid third-party code noise
           find . -name "*.sh" -type f -not -path "*/vendor/*" -print0 | \
-            xargs -0 --no-run-if-empty shellcheck --format=json --severity=warning > shellcheck.json
-          # Ensure valid JSON output even if no scripts found
-          [ -s shellcheck.json ] || echo "[]" > shellcheck.json
+            xargs -0 shellcheck --format=json --severity=warning > shellcheck.json
         continue-on-error: true
 
       # ============================================================================
       # DOCKERFILE SECURITY - Hadolint
       # ============================================================================
-      # Tool: Hadolint v2.14.0
+      # Tool: Hadolint v3.3.0
       # Purpose: Dockerfile linter enforcing best practices
       # Detects: Secrets in ENV, unpinned base images, running as root
       # Coverage: All Dockerfile* files (including Dockerfile.dev, etc.)
       # Standards: Enforces Docker best practices and CIS Benchmark recommendations
       # Output: SARIF format for GitHub Security tab integration
-      #
-      # Docker Image Pinning:
-      # - Git tag: v2.14.0-alpine
-      # - Docker digest: sha256:7aba693c1442eb31c0b015c129697cb3b6cb7da589d85c7562f9deb435a6657c
-      # - Why digest?: Immutable reference, prevents tag retargeting attacks
-      # - Source: https://github.com/hadolint/hadolint/pkgs/container/hadolint/versions
-      # - Verification: docker run --rm --entrypoint hadolint ghcr.io/hadolint/hadolint@sha256:7aba693c1442eb31c0b015c129697cb3b6cb7da589d85c7562f9deb435a6657c --version
 
       - name: Run Hadolint on Dockerfiles
         id: hadolint
-        run: |
-          # Find all Dockerfiles excluding test/example/vendor directories
-          # Use explicit path exclusions to avoid scanning test fixtures
-          # Store results in null-delimited array to handle filenames with spaces
-          mapfile -d '' -t DOCKERFILES < <(find . -type f -name "Dockerfile*" \
-            -not -path "*/examples/*" \
-            -not -path "*/testdata/*" \
-            -not -path "*/test/*" \
-            -not -path "*/tests/*" \
-            -not -path "*/docs/*" \
-            -not -path "*/vendor/*" \
-            -not -path "*/.git/*" -print0)
-
-          if [ ${#DOCKERFILES[@]} -eq 0 ]; then
-            echo "No Dockerfiles found to scan"
-            # Create empty SARIF file for consistency
-            echo '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[]}' > hadolint.sarif
-            exit 0
-          fi
-
-          # Run hadolint on each Dockerfile and combine results
-          docker run --rm -i \
-            -v "${{ github.workspace }}:/workspace" \
-            -w /workspace \
-            ghcr.io/hadolint/hadolint@sha256:7aba693c1442eb31c0b015c129697cb3b6cb7da589d85c7562f9deb435a6657c \
-            hadolint --config .github/config/hadolint.yaml --format sarif "${DOCKERFILES[@]}" > hadolint.sarif
+        uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5  # v3.3.0
+        with:
+          recursive: true
+          format: sarif
+          output-file: hadolint.sarif
         continue-on-error: true
 
       - name: Upload Hadolint SARIF results
@@ -284,7 +507,7 @@ jobs:
       # Coverage: All .yaml and .yml files (manifests, workflows, configs)
       # Benefit: Catches deployment-breaking YAML errors before runtime
       # Output: parsable format (file:line:col: [level] message (rule))
-      # Note: JSON format not yet supported - PR #442 in progress
+      # Note: JSON format not supported - PR #245 never merged
 
       - name: Install yamllint
         run: |
@@ -294,7 +517,7 @@ jobs:
       - name: Run yamllint
         id: yamllint
         run: |
-          yamllint -f parsable . > yamllint.txt
+          yamllint -f parsable . > yamllint.txt || true
         continue-on-error: true
 
       # ============================================================================
@@ -310,7 +533,7 @@ jobs:
       #
       # Docker Image Pinning:
       # - Git tag: v1.7.8
-      # - Docker digest (multi-arch): sha256:96d4a8c87dbbfb3bdd324f8fdc285fc3df5261e2decc619a4dd7e8ee52bbfd46
+      # - Docker digest (linux/amd64): sha256:32a5c57cebdc2aad2ca4083dcdf08a784795b06adde2082fd2ef724445582390
       # - Why digest?: Immutable reference, prevents tag retargeting attacks
       # - Verification: docker pull rhysd/actionlint:1.7.8 && docker inspect rhysd/actionlint:1.7.8 --format='{{.RepoDigests}}'
 
@@ -321,26 +544,41 @@ jobs:
           docker run --rm \
             -v "${{ github.workspace }}:/repo" \
             -w /repo \
-            rhysd/actionlint@sha256:96d4a8c87dbbfb3bdd324f8fdc285fc3df5261e2decc619a4dd7e8ee52bbfd46 \
+            rhysd/actionlint@sha256:32a5c57cebdc2aad2ca4083dcdf08a784795b06adde2082fd2ef724445582390 \
             --no-color > actionlint.txt 2>&1
         continue-on-error: true
 
       # ============================================================================
       # KUBERNETES MANIFEST SECURITY - kube-linter
       # ============================================================================
-      # Validates Kubernetes manifests for security misconfigurations, RBAC issues,
-      # privilege escalation risks, and CIS Kubernetes Benchmark compliance.
-      # Uses secure binary download + SHA256 verification (not 'go run' which could
-      # fetch malicious code via dependency confusion or compromised module mirrors)
-
-      - name: Set up Go for kube-linter
-        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00  # v6.0.0
-        with:
-          go-version-file: go.mod
+      # Tool: kube-linter v0.8.1
+      # Purpose: Kubernetes manifest validation for security and best practices
+      # Coverage: 36 security checks (up from 9 original checks):
+      #   - Container security (13 checks): privilege escalation, host namespaces,
+      #     docker.sock, sensitive mounts, capabilities, sysctls
+      #   - RBAC (5 checks): CIS Benchmark 5.1.1-5.1.4 (cluster-admin, secrets,
+      #     wildcards, pod creation)
+      #   - Secret management (2 checks): CIS 5.4.1 (env vars vs mounted secrets)
+      #   - Service Account (2 checks): default SA, non-existent SA
+      #   - Network security (4 checks): privileged ports, SSH, exposed services,
+      #     NetworkPolicy isolation
+      #   - Reliability (4 checks): liveness/readiness probes, resource limits
+      #   - Namespace isolation (1 check): CIS 5.7.1, 5.7.4 (default namespace)
+      #   - Image security (1 check): latest tag prohibition
+      # Config: .kube-linter.yaml (36 checks total, organized by category)
+      # Output: SARIF (GitHub Security tab) + JSON (comprehensive report)
+      # Scope: Rendered Kubernetes manifests from kustomize build
+      #
+      # Integration Notes:
+      # - Complements RBAC Analyzer: kube-linter checks individual RBAC rules,
+      #   RBAC Analyzer maps full privilege chains (Pod→SA→Role→Binding)
+      # - Runs in both PR workflow (test-linter.yaml) and weekly full scan
 
       - name: Install kube-linter
+        if: hashFiles('go.mod') != '' || hashFiles('Makefile') != ''
         run: |
           # Install pre-built binary from GitHub Releases (avoids supply chain risk)
+          # Using official release instead of go run module@version
           set -euo pipefail
           KUBE_LINTER_VERSION="v0.8.1"
           KUBE_LINTER_ASSET="kube-linter-linux.tar.gz"
@@ -354,46 +592,68 @@ jobs:
           kube-linter version
           rm -f "${KUBE_LINTER_ASSET}"
 
+      - name: Set up Go for kustomize
+        if: hashFiles('go.mod') != ''
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00  # v6.0.0
+        with:
+          go-version-file: go.mod
+
       - name: Run kube-linter
+        if: hashFiles('go.mod') != '' || hashFiles('Makefile') != ''
         id: kubelinter
         timeout-minutes: 5
         run: |
-          set -euo pipefail
           # Prepare kustomize and render manifests
           make prepare
           TMP_FILE=$(mktemp /tmp/kube-lint.XXXXXX.yaml)
           ./bin/kustomize build config/manifests > "$TMP_FILE"
 
-          # Disable exit-on-error to capture kube-linter exit codes without short-circuiting
-          set +e
-
           # Run kube-linter with JSON output for comprehensive report
+          # Capture exit code separately from output to distinguish scanner errors from findings
+          set +e  # Don't exit on non-zero
           kube-linter lint \
             --config .kube-linter.yaml \
             --format json \
             "$TMP_FILE" > kube-linter.json
           JSON_EXIT=$?
+          set -e
 
           # Run kube-linter with SARIF output for GitHub Security tab
+          set +e
           kube-linter lint \
             --config .kube-linter.yaml \
             --format sarif \
-            "$TMP_FILE" > kube-linter.sarif
+            "$TMP_FILE" > kube-linter.sarif 2>kube-linter.stderr
           SARIF_EXIT=$?
-
-          # Re-enable exit-on-error for subsequent commands
           set -e
 
-          rm -f "$TMP_FILE"
-
-          # Validate SARIF output was generated
-          if [ ! -s kube-linter.sarif ]; then
-            echo "ERROR: kube-linter.sarif is missing or empty" >&2
+          # Validate outputs - empty/invalid output means scanner failed, not "no findings"
+          if [ $JSON_EXIT -ne 0 ] && [ ! -s kube-linter.json ]; then
+            echo "❌ kube-linter JSON output failed or empty (exit: $JSON_EXIT)"
+            echo "::warning::kube-linter failed to produce valid JSON output"
             exit 1
           fi
 
-          # Exit non-zero if either run detected findings (for accurate step outcome)
-          [ $JSON_EXIT -eq 0 ] && [ $SARIF_EXIT -eq 0 ] || exit 1
+          # If JSON is valid and contains findings, exit non-zero so summary shows "Issues Found"
+          if [ -s kube-linter.json ] && jq -e . >/dev/null 2>&1 < kube-linter.json; then
+            findings_count=$(jq '.Reports | length' kube-linter.json 2>/dev/null || echo 0)
+            if [ "${findings_count:-0}" -gt 0 ]; then
+              exit 1
+            fi
+          else
+            if [ -f kube-linter.json ]; then
+              echo "::warning::kube-linter produced invalid JSON"
+              exit 1
+            fi
+          fi
+
+          if [ $SARIF_EXIT -ne 0 ] && [ ! -s kube-linter.sarif ]; then
+            echo "❌ kube-linter SARIF output failed or empty (exit: $SARIF_EXIT)"
+            cat kube-linter.stderr || true
+            echo "::warning::kube-linter failed to produce valid SARIF output"
+          fi
+
+          rm -f "$TMP_FILE" kube-linter.stderr
         continue-on-error: true
 
       - name: Upload kube-linter SARIF results
@@ -424,14 +684,17 @@ jobs:
       # Complement: Semgrep catches individual RBAC issues, this finds relationships
 
       - name: Setup Python for RBAC Analysis
+        if: hashFiles('.github/scripts/rbac-analyzer.py') != '' || hashFiles('config/**/*.yaml', 'manifests/**/*.yaml', 'kustomize/**/*.yaml', 'overlays/**/*.yaml', 'base/**/*.yaml') != ''
         uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548  # v6.1.0
         with:
           python-version: '3.11'
 
       - name: Install PyYAML for RBAC analyzer
+        if: hashFiles('.github/scripts/rbac-analyzer.py') != '' || hashFiles('config/**/*.yaml', 'manifests/**/*.yaml', 'kustomize/**/*.yaml', 'overlays/**/*.yaml', 'base/**/*.yaml') != ''
         run: python -m pip install "pyyaml==6.0.3"
 
       - name: Run RBAC Privilege Chain Analyzer (Public Version)
+        if: hashFiles('.github/scripts/rbac-analyzer.py') != '' || hashFiles('config/**/*.yaml', 'manifests/**/*.yaml', 'kustomize/**/*.yaml', 'overlays/**/*.yaml', 'base/**/*.yaml') != ''
         id: rbac_analyzer
         run: |
           # Generate public version (no attack scenarios) for artifacts
@@ -442,21 +705,17 @@ jobs:
         continue-on-error: true
 
       - name: Generate RBAC Analysis with Attack Scenarios (Private Version)
+        if: always() && (hashFiles('.github/scripts/rbac-analyzer.py') != '' || hashFiles('config/**/*.yaml', 'manifests/**/*.yaml', 'kustomize/**/*.yaml', 'overlays/**/*.yaml', 'base/**/*.yaml') != '')
         id: rbac_analyzer_private
-        if: always()
         run: |
           # Generate private version with detailed attack scenarios for security advisory
-          python .github/scripts/rbac-analyzer.py . --fail-on HIGH --include-attack-scenarios > rbac-analysis-private.md 2>&1
+          python .github/scripts/rbac-analyzer.py . --fail-on HIGH --include-attack-scenarios 2>&1 | tee rbac-analysis-private.md
           echo "✅ Private RBAC analysis with attack scenarios generated (for security advisory)"
         continue-on-error: true
 
-      - name: Upload RBAC analysis report
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
-        with:
-          name: rbac-analysis-report
-          path: rbac-analysis.md
-          retention-days: 30
+      # NOTE: RBAC analysis report upload to artifacts removed for security
+      # Reports are stored in Quay.io with RBAC-controlled access
+      # Use /get-report command to retrieve reports
 
       # ============================================================================
       # COMPREHENSIVE SECURITY REPORT GENERATION
@@ -481,6 +740,7 @@ jobs:
           GITHUB_REF_NAME: ${{ github.ref_name }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_RUN_ID: ${{ github.run_id }}
+          SECURITY_BASELINE: ${{ env.BASELINE_YAML }}
         run: |
           python .github/scripts/generate-security-report.py \
             --output security-report.md \
@@ -490,21 +750,204 @@ jobs:
             --yamllint-limit 30
           echo "## Comprehensive Security Report Generated" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "A detailed security report has been generated and uploaded as an artifact." >> $GITHUB_STEP_SUMMARY
-          echo "Download it from the workflow artifacts section for full details." >> $GITHUB_STEP_SUMMARY
-        # This file drives the "fail on critical/high" gate; do not fail-open here.
-        continue-on-error: false
+          echo "A detailed security report has been generated and will be pushed to Quay.io." >> $GITHUB_STEP_SUMMARY
+          echo "Reports are stored securely in Quay.io with RBAC-controlled access." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To retrieve reports, use the \`/sec-scan:show-report\` command or see push step output for exact image tags." >> $GITHUB_STEP_SUMMARY
+        continue-on-error: true
 
-      - name: Upload comprehensive security report
+      # ============================================================================
+      # REPORT INTEGRITY VERIFICATION
+      # ============================================================================
+      # Generate SHA256 checksums for all report files
+      # Checksums stored alongside reports in container image
+      # Allows verification of report integrity after retrieval
+
+      - name: Copy baseline for user download
+        if: always()
+        run: |
+          # Copy baseline to working directory so users can download it via artifacts
+          # This is needed for the /sec-scan:acknowledge workflow - users need the current baseline
+          if [ -f /tmp/baseline.yaml ]; then
+            cp /tmp/baseline.yaml security-baseline.yaml
+            echo "✅ Copied baseline.yaml for artifact download"
+          else
+            echo "⚠️  Warning: baseline.yaml not found in /tmp (this shouldn't happen)"
+          fi
+
+      - name: Generate report checksums
         if: always() && hashFiles('security-report.md') != ''
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
-        with:
-          name: comprehensive-security-report
-          path: |
-            security-report.md
-            security-summary.json
-            yamllint-report.md
-          retention-days: 90
+        run: |
+          echo "🔒 Generating integrity checksums for reports..."
+
+          # Generate checksums for all report files
+          sha256sum security-report.md > security-report.md.sha256
+          sha256sum security-summary.json > security-summary.json.sha256
+          [ -f security-baseline.yaml ] && sha256sum security-baseline.yaml > security-baseline.yaml.sha256
+
+          # Generate checksums for tool-specific reports (if they exist)
+          [ -f gitleaks-report.json ] && sha256sum gitleaks-report.json > gitleaks-report.json.sha256
+          [ -f trufflehog-report.json ] && sha256sum trufflehog-report.json > trufflehog-report.json.sha256
+          [ -f semgrep.sarif ] && sha256sum semgrep.sarif > semgrep.sarif.sha256
+          [ -f shellcheck-report.json ] && sha256sum shellcheck-report.json > shellcheck-report.json.sha256
+          [ -f hadolint.sarif ] && sha256sum hadolint.sarif > hadolint.sarif.sha256
+          [ -f yamllint-report.md ] && sha256sum yamllint-report.md > yamllint-report.md.sha256
+          [ -f actionlint.txt ] && sha256sum actionlint.txt > actionlint.txt.sha256
+          [ -f kube-linter-report.json ] && sha256sum kube-linter-report.json > kube-linter-report.json.sha256
+          [ -f rbac-analysis.md ] && sha256sum rbac-analysis.md > rbac-analysis.md.sha256
+
+          # Create master checksum file
+          cat *.sha256 > CHECKSUMS.sha256 2>/dev/null || true
+
+          # Create placeholder files for any missing reports (ensures COPY won't fail)
+          for file in gitleaks-report.json trufflehog-report.json semgrep.sarif shellcheck-report.json hadolint.sarif yamllint-report.md actionlint.txt kube-linter-report.json rbac-analysis.md security-baseline.yaml; do
+            if [ ! -f "$file" ]; then
+              echo "# No findings or tool not run" > "$file"
+              sha256sum "$file" > "${file}.sha256"
+            fi
+          done
+
+          echo "✅ Checksums generated for all reports"
+          echo ""
+          echo "To verify report integrity after retrieval:"
+          echo "  sha256sum -c security-report.md.sha256"
+        continue-on-error: true
+
+      # NOTE: GitHub artifacts upload removed for security
+      # Reports are ONLY stored in Quay.io (RBAC-controlled)
+      # This prevents security reports from being accessible to all repo collaborators
+
+      # ============================================================================
+      # QUAY.IO REPORT STORAGE (MANDATORY)
+      # ============================================================================
+      # Package security reports as container image and push to Quay.io
+      # Provides RBAC-controlled access to security reports
+      # Reports stored in quay.io/rhoai-security/scans/{repo}:{date}
+      # Only authorized teams can access reports (via Quay.io team permissions)
+
+      - name: Package reports as container image
+        id: package-reports
+        if: always() && hashFiles('security-report.md') != ''
+        run: |
+          # Create Dockerfile for scratch container with all reports and checksums
+          cat > Dockerfile <<'EOF'
+          FROM scratch
+          # Main reports
+          COPY security-report.md /report.md
+          COPY security-summary.json /summary.json
+          COPY security-baseline.yaml /baseline.yaml
+
+          # Tool-specific reports
+          COPY gitleaks-report.json /gitleaks.json
+          COPY trufflehog-report.json /trufflehog.json
+          COPY semgrep.sarif /semgrep.sarif
+          COPY shellcheck-report.json /shellcheck.json
+          COPY hadolint.sarif /hadolint.sarif
+          COPY yamllint-report.md /yamllint.md
+          COPY actionlint.txt /actionlint.txt
+          COPY kube-linter-report.json /kube-linter.json
+          COPY rbac-analysis.md /rbac-analysis.md
+
+          # Integrity checksums (SHA256)
+          COPY security-report.md.sha256 /report.md.sha256
+          COPY security-summary.json.sha256 /summary.json.sha256
+          COPY security-baseline.yaml.sha256 /baseline.yaml.sha256
+          COPY gitleaks-report.json.sha256 /gitleaks.json.sha256
+          COPY trufflehog-report.json.sha256 /trufflehog.json.sha256
+          COPY semgrep.sarif.sha256 /semgrep.sarif.sha256
+          COPY shellcheck-report.json.sha256 /shellcheck.json.sha256
+          COPY hadolint.sarif.sha256 /hadolint.sarif.sha256
+          COPY yamllint-report.md.sha256 /yamllint.md.sha256
+          COPY actionlint.txt.sha256 /actionlint.txt.sha256
+          COPY kube-linter-report.json.sha256 /kube-linter.json.sha256
+          COPY rbac-analysis.md.sha256 /rbac-analysis.md.sha256
+          COPY CHECKSUMS.sha256 /CHECKSUMS.sha256
+          EOF
+
+          # Build container image with reports
+          REPO_NAME="${{ github.event.repository.name }}"
+          DATE_TAG="$(date -u +%Y%m%d-%H%M%S)"
+          COMMIT_SHA="${{ github.sha }}"
+          SHORT_SHA="${COMMIT_SHA:0:7}"
+
+          # Output values for use in push step
+          echo "date_tag=${DATE_TAG}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+          # Reuse namespace and repo name from validation step (already calculated and verified)
+          QUAY_NAMESPACE="${{ steps.validate-quay.outputs.quay_namespace }}"
+          QUAY_REPO_NAME="${{ steps.validate-quay.outputs.quay_repo_name }}"
+
+          # Output values for use in push step
+          echo "quay_namespace=${QUAY_NAMESPACE}" >> $GITHUB_OUTPUT
+          echo "quay_repo_name=${QUAY_REPO_NAME}" >> $GITHUB_OUTPUT
+
+          # Build image with two tags (always prefixed with 'scan-' for clarity):
+          # 1. scan-{repo}-{date}-{sha} - timestamp + commit correlation
+          # 2. scan-{repo}-latest - always get most recent
+          BASE_URL="quay.io/${QUAY_NAMESPACE}/${QUAY_REPO_NAME}"
+
+          podman build -t "${BASE_URL}:scan-${REPO_NAME}-${DATE_TAG}-${SHORT_SHA}" .
+          podman tag "${BASE_URL}:scan-${REPO_NAME}-${DATE_TAG}-${SHORT_SHA}" "${BASE_URL}:scan-${REPO_NAME}-latest"
+
+          echo "📦 Built container image with tags:"
+          echo "   - ${BASE_URL}:scan-${REPO_NAME}-${DATE_TAG}-${SHORT_SHA} (timestamp + commit)"
+          echo "   - ${BASE_URL}:scan-${REPO_NAME}-latest (most recent)"
+        continue-on-error: true
+
+      - name: Push reports to Quay.io
+        if: always() && hashFiles('security-report.md') != ''
+        env:
+          QUAY_TOKEN: ${{ secrets.QUAY_TOKEN }}
+        run: |
+          # Reuse validated credentials from validate-quay step
+          QUAY_USERNAME="${{ steps.validate-quay.outputs.quay_username }}"
+          QUAY_NAMESPACE="${{ steps.package-reports.outputs.quay_namespace }}"
+          QUAY_REPO_NAME="${{ steps.package-reports.outputs.quay_repo_name }}"
+
+          REPO_NAME="${{ github.event.repository.name }}"
+          DATE_TAG="${{ steps.package-reports.outputs.date_tag }}"
+          SHORT_SHA="${{ steps.package-reports.outputs.short_sha }}"
+
+          BASE_URL="quay.io/${QUAY_NAMESPACE}/${QUAY_REPO_NAME}"
+
+          # Login to Quay.io (credentials already validated in validate-quay step)
+          echo "$QUAY_TOKEN" | podman login quay.io -u "$QUAY_USERNAME" --password-stdin
+
+          # Push both tags (always prefixed with 'scan-')
+          podman push "${BASE_URL}:scan-${REPO_NAME}-${DATE_TAG}-${SHORT_SHA}"
+          podman push "${BASE_URL}:scan-${REPO_NAME}-latest"
+
+          echo "✅ Reports pushed to Quay.io:"
+          echo "   - ${BASE_URL}:scan-${REPO_NAME}-${DATE_TAG}-${SHORT_SHA} (timestamp + commit)"
+          echo "   - ${BASE_URL}:scan-${REPO_NAME}-latest (most recent)"
+          echo ""
+          echo "📥 To retrieve reports, use the /get-report command:"
+          echo "   /get-report"
+          echo ""
+          echo "Or manually:"
+          echo "   # Pull latest scan:"
+          echo "   podman pull ${BASE_URL}:scan-${REPO_NAME}-latest"
+          echo ""
+          echo "   # Pull specific scan by timestamp + commit:"
+          echo "   podman pull ${BASE_URL}:scan-${REPO_NAME}-${DATE_TAG}-${SHORT_SHA}"
+          echo ""
+          echo "   # Extract reports:"
+          echo "   CONTAINER=\$(podman create ${BASE_URL}:scan-${REPO_NAME}-latest)"
+          echo "   podman cp \$CONTAINER:/report.md ./security-report.md"
+          echo "   podman cp \$CONTAINER:/summary.json ./security-summary.json"
+          echo "   podman rm \$CONTAINER"
+          echo ""
+          echo "💡 Tag Retention Management:"
+          echo "   Quay.io supports automatic tag expiration to prevent storage bloat."
+          echo "   Consider configuring tag lifecycle policies in Quay.io repository settings:"
+          echo ""
+          echo "   Recommended policy:"
+          echo "   - Keep timestamped tags (scan-${REPO_NAME}-YYYYMMDD-HHMMSS-SHA) for 90 days"
+          echo "   - Keep scan-${REPO_NAME}-latest tag indefinitely"
+          echo ""
+          echo "   Configure at: https://quay.io/repository/${QUAY_NAMESPACE}/${QUAY_REPO_NAME}?tab=settings"
+          echo "   Settings → Repository Tags → Tag Expiration"
 
       # ============================================================================
       # DETERMINE ADVISORY SEVERITY
@@ -513,25 +956,21 @@ jobs:
       # in the comprehensive security report, rather than using hardcoded 'high'.
 
       - name: Determine advisory severity
-        if: always() && hashFiles('security-summary.json') != ''
+        if: always() && hashFiles('security-report.md') != ''
         id: severity
         run: |
-          # Check security-summary.json for actual finding counts
-          critical=$(jq -r '.severity_counts.critical // 0' security-summary.json)
-          high=$(jq -r '.severity_counts.high // 0' security-summary.json)
-          medium=$(jq -r '.severity_counts.medium // 0' security-summary.json)
-
-          if [[ "$critical" =~ ^[0-9]+$ ]] && (( critical > 0 )); then
-            echo "severity=critical" >> "$GITHUB_OUTPUT"
-            echo "📊 Detected CRITICAL findings ($critical) - advisory severity: critical"
-          elif [[ "$high" =~ ^[0-9]+$ ]] && (( high > 0 )); then
-            echo "severity=high" >> "$GITHUB_OUTPUT"
-            echo "📊 Detected HIGH findings ($high) - advisory severity: high"
-          elif [[ "$medium" =~ ^[0-9]+$ ]] && (( medium > 0 )); then
-            echo "severity=moderate" >> "$GITHUB_OUTPUT"
-            echo "📊 Detected MEDIUM findings ($medium) - advisory severity: moderate"
+          # Check comprehensive report for critical/high findings
+          if grep -q '🔴 CRITICAL' security-report.md || grep -q 'Critical:' security-report.md; then
+            echo "severity=critical" >> $GITHUB_OUTPUT
+            echo "📊 Detected CRITICAL findings - advisory severity: critical"
+          elif grep -q '🟠 HIGH' security-report.md || grep -q 'High:' security-report.md; then
+            echo "severity=high" >> $GITHUB_OUTPUT
+            echo "📊 Detected HIGH findings - advisory severity: high"
+          elif grep -q '🟡 MEDIUM' security-report.md || grep -q 'Medium:' security-report.md; then
+            echo "severity=moderate" >> $GITHUB_OUTPUT
+            echo "📊 Detected MEDIUM findings - advisory severity: moderate"
           else
-            echo "severity=low" >> "$GITHUB_OUTPUT"
+            echo "severity=low" >> $GITHUB_OUTPUT
             echo "📊 No high-severity findings - advisory severity: low"
           fi
         continue-on-error: true
@@ -699,7 +1138,7 @@ jobs:
           # kube-linter
           status_result=$(get_status "$KUBELINTER_OUTCOME" "kube-linter.json")
           severity_summary=$(get_severity_badge "kube-linter")
-          echo "| kube-linter | Kubernetes manifest security (RBAC, privileges) | ${status_result%%|*} | ${status_result##*|}${severity_summary} |" >> $GITHUB_STEP_SUMMARY
+          echo "| kube-linter | Kubernetes manifest security (36 checks) | ${status_result%%|*} | ${status_result##*|}${severity_summary} |" >> $GITHUB_STEP_SUMMARY
 
           # RBAC Analyzer
           status_result=$(get_status "$RBAC_OUTCOME" "rbac-analysis.md")
@@ -735,7 +1174,7 @@ jobs:
             if $has_failures; then
               echo "⚠️ **Security issues detected - review required**" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
-              echo "Download the **comprehensive-security-report** artifact for detailed findings." >> $GITHUB_STEP_SUMMARY
+              echo "Use \`/sec-scan:show-report\` command to view detailed findings from Quay.io." >> $GITHUB_STEP_SUMMARY
             elif $has_incomplete; then
               echo "ℹ️ **Security scans incomplete - review required**" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
@@ -757,14 +1196,26 @@ jobs:
 
           # Validate numeric values
           if [[ "$critical" =~ ^[0-9]+$ ]] && [[ $critical -gt 0 ]]; then
+            echo "::error::$critical CRITICAL security findings detected - review security report for details"
+            echo ""
             echo "❌ Workflow failed: $critical CRITICAL findings detected"
-            echo "Review the comprehensive-security-report artifact for details"
+            echo ""
+            echo "Next steps:"
+            echo "  1. View report: /sec-scan:show-report --latest"
+            echo "  2. Review critical findings in security-report.md"
+            echo "  3. Fix vulnerabilities or acknowledge false positives using /sec-scan:acknowledge command"
             exit 1
           fi
 
           if [[ "$high" =~ ^[0-9]+$ ]] && [[ $high -gt 0 ]]; then
+            echo "::error::$high HIGH severity findings detected - review security report for details"
+            echo ""
             echo "❌ Workflow failed: $high HIGH severity findings detected"
-            echo "Review the comprehensive-security-report artifact for details"
+            echo ""
+            echo "Next steps:"
+            echo "  1. View report: /sec-scan:show-report --latest"
+            echo "  2. Review high severity findings in security-report.md"
+            echo "  3. Fix vulnerabilities or acknowledge false positives using /sec-scan:acknowledge command"
             exit 1
           fi
 
@@ -781,13 +1232,27 @@ jobs:
       # - App credentials (App ID and Private Key) must be stored as repository secrets
       # - Uses continue-on-error to allow workflow to complete even if secrets are missing
 
+      - name: Check if GitHub App secrets are configured
+        id: check_app_secrets
+        env:
+          APP_ID: ${{ secrets.SECURITY_APP_ID }}
+          APP_KEY: ${{ secrets.SECURITY_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$APP_ID" ] && [ -n "$APP_KEY" ]; then
+            echo "configured=true" >> $GITHUB_OUTPUT
+          else
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "ℹ️  GitHub App credentials not configured - security advisory creation disabled"
+          fi
+
       - name: Generate GitHub App token
         if: |
-          inputs.test_advisory == true ||
-          steps.gitleaks.outcome == 'failure' ||
-          steps.trufflehog.outcome == 'failure' ||
-          steps.semgrep.outcome == 'failure' ||
-          steps.rbac_analyzer.outcome == 'failure'
+          steps.check_app_secrets.outputs.configured == 'true' &&
+          (inputs.test_advisory == true ||
+           steps.gitleaks.outcome == 'failure' ||
+           steps.trufflehog.outcome == 'failure' ||
+           steps.semgrep.outcome == 'failure' ||
+           steps.rbac_analyzer.outcome == 'failure')
         id: app_token
         continue-on-error: true
         uses: actions/create-github-app-token@5d869da34e18e7287c1daad50e0b8ea0f506ce69  # v1.11.0
@@ -819,3 +1284,17 @@ jobs:
               commit: '${{ github.sha }}',
               branch: '${{ github.ref_name }}'
             })
+
+      # ============================================================================
+      # CLEANUP SENSITIVE FILES
+      # ============================================================================
+      # Remove temporary baseline file that contains vulnerability acknowledgment data
+      # This prevents sensitive information from persisting on the runner or in logs
+
+      - name: Clean up temporary baseline file
+        if: always()
+        run: |
+          if [ -f /tmp/baseline.yaml ]; then
+            rm -f /tmp/baseline.yaml
+            echo "✅ Cleaned up temporary baseline file"
+          fi

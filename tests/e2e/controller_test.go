@@ -133,6 +133,7 @@ var (
 				componentApi.FeastOperatorComponentName:        feastOperatorTestSuite,
 				componentApi.LlamaStackOperatorComponentName:   llamastackOperatorTestSuite,
 				componentApi.MLflowOperatorComponentName:       mlflowOperatorTestSuite,
+				componentApi.SparkOperatorComponentName:        sparkOperatorTestSuite,
 			},
 			{
 				// Kueue tests depends on Workbenches, so must not run with Workbenches tests in parallel
@@ -308,6 +309,11 @@ func TestOdhOperator(t *testing.T) {
 	// Run components and services test suites
 	mustRun(t, Components.String(), Components.Run)
 	mustRun(t, Services.String(), Services.Run)
+
+	// Run DSCI/DSC Webhook test suite
+	if testOpts.webhookTest {
+		mustRun(t, "DSCInitialization and DataScienceCluster Webhook E2E Tests", dscWebhookTestSuite)
+	}
 
 	// Run operator resilience test suites after functional tests
 	if testOpts.operatorResilienceTest {

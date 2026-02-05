@@ -96,6 +96,7 @@ import (
 	_ "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/components/modelregistry"
 	_ "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/components/modelsasservice"
 	_ "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/components/ray"
+	_ "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/components/sparkoperator"
 	_ "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/components/trainer"
 	_ "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/components/trainingoperator"
 	_ "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/components/trustyai"
@@ -258,13 +259,6 @@ func main() { //nolint:funlen,maintidx,gocyclo
 		os.Exit(1)
 	}
 
-	// get old release version before we create default DSCI CR
-	oldReleaseVersion, err := cluster.GetDeployedRelease(ctx, setupClient)
-	if err != nil {
-		setupLog.Error(err, "unable to get deployed release version")
-		os.Exit(1)
-	}
-
 	secretCache, err := createSecretCacheConfig(platform)
 	if err != nil {
 		setupLog.Error(err, "unable to get application namespace into cache")
@@ -412,13 +406,15 @@ func main() { //nolint:funlen,maintidx,gocyclo
 	if existDSCConfig && disableDSCConfig != "false" {
 		setupLog.Info("DSCI auto creation is disabled")
 	} else {
-		var createDefaultDSCIFunc manager.RunnableFunc = func(ctx context.Context) error {
+		createDefaultDSCIFunc := LeaderElectionRunnableFunc(func(ctx context.Context) error {
+			setupLog.Info("create default DSCI")
 			err := initialinstall.CreateDefaultDSCI(ctx, setupClient, platform, oconfig.MonitoringNamespace)
 			if err != nil {
 				setupLog.Error(err, "unable to create initial setup for the operator")
 			}
 			return err
-		}
+		})
+
 		err := mgr.Add(createDefaultDSCIFunc)
 		if err != nil {
 			setupLog.Error(err, "error scheduling DSCI creation")
@@ -428,13 +424,14 @@ func main() { //nolint:funlen,maintidx,gocyclo
 
 	// Create default DSC CR for managed RHOAI
 	if platform == cluster.ManagedRhoai {
-		var createDefaultDSCFunc manager.RunnableFunc = func(ctx context.Context) error {
+		createDefaultDSCFunc := LeaderElectionRunnableFunc(func(ctx context.Context) error {
+			setupLog.Info("create default DSC")
 			err := initialinstall.CreateDefaultDSC(ctx, setupClient)
 			if err != nil {
 				setupLog.Error(err, "unable to create default DSC CR by the operator")
 			}
 			return err
-		}
+		})
 		err := mgr.Add(createDefaultDSCFunc)
 		if err != nil {
 			setupLog.Error(err, "error scheduling DSC creation")
@@ -443,14 +440,16 @@ func main() { //nolint:funlen,maintidx,gocyclo
 	}
 
 	// Cleanup resources from previous v2 releases
-	var cleanExistingResourceFunc manager.RunnableFunc = func(ctx context.Context) error {
-		if err = upgrade.CleanupExistingResource(ctx, setupClient, platform, oldReleaseVersion); err != nil {
+	cleanup := LeaderElectionRunnableFunc(func(ctx context.Context) error {
+		setupLog.Info("run upgrade task")
+		if err := upgrade.CleanupExistingResource(ctx, setupClient); err != nil {
 			setupLog.Error(err, "unable to perform cleanup")
+			return err
 		}
-		return err
-	}
+		return nil
+	})
 
-	err = mgr.Add(cleanExistingResourceFunc)
+	err = mgr.Add(cleanup)
 	if err != nil {
 		setupLog.Error(err, "error remove deprecated resources from previous version")
 	}
@@ -469,6 +468,23 @@ func main() { //nolint:funlen,maintidx,gocyclo
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+//nolint:ireturn
+func LeaderElectionRunnableFunc(fn manager.RunnableFunc) manager.Runnable {
+	return &LeaderElectionRunnableWrapper{Fn: fn}
+}
+
+type LeaderElectionRunnableWrapper struct {
+	Fn manager.RunnableFunc
+}
+
+func (l *LeaderElectionRunnableWrapper) Start(ctx context.Context) error {
+	return l.Fn(ctx)
+}
+
+func (l *LeaderElectionRunnableWrapper) NeedLeaderElection() bool {
+	return true
 }
 
 func getCommonCache(platform common.Platform) (map[string]cache.Config, error) {

@@ -1730,3 +1730,302 @@ rules:
     metadata:
       cwe: "CWE-78"
       category: "security"
+
+  # ===========================================================================
+  # DEEP ANALYSIS RULES — Findings from AI Deep Scan Gap Analysis
+  # ===========================================================================
+  # These rules address detection gaps identified by comparing our static
+  # scanner results against an AI-driven deep code review (March 2026).
+  # They target business logic and architectural security patterns that
+  # standard rule sets do not cover.
+  # ===========================================================================
+
+  - id: go-env-driven-tls-bypass
+    languages: [go]
+    severity: WARNING
+    message: |
+      Environment variable conditionally disables TLS verification (CWE-295).
+
+      Attack Vector: An attacker who can set environment variables (e.g. via
+      container spec, CI/CD config, or Kubernetes ConfigMap) can silently disable
+      TLS certificate validation, enabling Man-in-the-Middle attacks against
+      all outbound HTTPS connections from this process.
+
+      Context: Environment-driven TLS bypass is especially dangerous in operator
+      and controller code because it affects cluster-wide communications.
+
+      Remediation:
+        - Remove env-var-driven TLS bypass entirely
+        - If needed for development, gate behind a build tag (//go:build dev)
+          so the code is never compiled in production images
+        - Use proper CA bundle configuration instead of skipping verification
+    patterns:
+      - pattern-either:
+          - pattern: os.Getenv("$ENVVAR")
+      - metavariable-regex:
+          metavariable: $ENVVAR
+          regex: .*(INSECURE|SKIP_TLS|SKIP_VERIFY).*
+    paths:
+      exclude:
+        - "**/vendor/**"
+        - "**/*_test.go"
+        - "**/test/**"
+    metadata:
+      cwe: "CWE-295"
+      category: "security"
+
+  - id: python-path-traversal-expanduser
+    languages: [python]
+    severity: WARNING
+    message: |
+      os.path.expanduser() used without path canonicalization (CWE-22).
+
+      Attack Vector: expanduser() resolves "~" to a home directory but does not
+      prevent path traversal. Input such as "~/../../../etc/passwd" expands to a
+      valid absolute path that escapes the intended directory.
+
+      Context: This is common in ML/data-science services that accept user-
+      supplied dataset or model paths. Without canonicalization, an attacker can
+      read or overwrite arbitrary files.
+
+      Remediation: Always canonicalize the result before use:
+        safe = os.path.realpath(os.path.expanduser(user_path))
+        if not safe.startswith(ALLOWED_BASE):
+            raise ValueError("Path traversal detected")
+    patterns:
+      - pattern: os.path.expanduser($PATH)
+      - pattern-not-inside: os.path.realpath(os.path.expanduser(...))
+      - pattern-not-inside: os.path.abspath(os.path.expanduser(...))
+    paths:
+      exclude:
+        - "**/tests/**"
+        - "**/*_test.py"
+        - "**/test_*.py"
+    metadata:
+      cwe: "CWE-22"
+      category: "security"
+
+  - id: flask-endpoint-missing-auth
+    languages: [python]
+    severity: INFO
+    message: |
+      Flask route handler without authentication decorator (CWE-862).
+
+      Attack Vector: Endpoints without authentication checks are accessible to
+      any caller. If the endpoint exposes sensitive data or mutates state, an
+      unauthenticated attacker can exploit it directly.
+
+      Context: This is an audit rule — it will flag intentionally public
+      endpoints (health checks, landing pages). Review each match and suppress
+      with "# nosemgrep: flask-endpoint-missing-auth" where appropriate.
+
+      Remediation: Add an authentication decorator:
+        @app.route("/admin")
+        @login_required          # or @auth_required, @requires_auth
+        def admin_panel():
+            ...
+    patterns:
+      - pattern: |
+          @$APP.route(...)
+          def $FUNC(...):
+              ...
+      - pattern-not: |
+          @$APP.route(...)
+          @login_required
+          def $FUNC(...):
+              ...
+      - pattern-not: |
+          @$APP.route(...)
+          @auth_required
+          def $FUNC(...):
+              ...
+      - pattern-not: |
+          @$APP.route(...)
+          @requires_auth
+          def $FUNC(...):
+              ...
+      - pattern-not: |
+          @$APP.route(...)
+          @jwt_required
+          def $FUNC(...):
+              ...
+      - pattern-not: |
+          @$APP.route(...)
+          @jwt_required()
+          def $FUNC(...):
+              ...
+    metadata:
+      cwe: "CWE-862"
+      category: "security"
+
+  - id: python-llm-prompt-injection-basic
+    languages: [python]
+    severity: WARNING
+    message: |
+      User input passed directly to LLM API call — prompt injection risk (OWASP LLM01).
+
+      Attack Vector: Unsanitized user input embedded in LLM prompts allows an
+      attacker to override system instructions, exfiltrate data, or trigger
+      unintended actions via the model's tool-use capabilities.
+
+      Context: This basic pattern detects direct use of request data (Flask) in
+      calls to Anthropic or OpenAI APIs. It will not catch indirect flows
+      through intermediate variables — taint-mode rules are needed for full
+      coverage.
+
+      Remediation:
+        - Sanitize and validate user input before including in prompts
+        - Use structured message formats separating system and user content
+        - Apply output filtering to detect and block injection attempts
+        - Implement rate limiting on LLM endpoints
+    pattern-either:
+      - pattern: |
+          $CLIENT.messages.create(..., messages=[..., {"content": request.json[...]}, ...], ...)
+      - pattern: |
+          $CLIENT.messages.create(..., messages=[..., {"content": request.form[...]}, ...], ...)
+      - pattern: |
+          $CLIENT.messages.create(..., messages=[..., {"content": request.data}, ...], ...)
+      - pattern: |
+          $CLIENT.messages.create(..., messages=[..., {"content": request.args[...]}, ...], ...)
+      - pattern: |
+          $CLIENT.chat.completions.create(..., messages=[..., {"content": request.json[...]}, ...], ...)
+      - pattern: |
+          $CLIENT.chat.completions.create(..., messages=[..., {"content": request.form[...]}, ...], ...)
+      - pattern: |
+          $CLIENT.chat.completions.create(..., messages=[..., {"content": request.data}, ...], ...)
+      - pattern: |
+          $CLIENT.chat.completions.create(..., messages=[..., {"content": request.args[...]}, ...], ...)
+    paths:
+      exclude:
+        - "**/tests/**"
+        - "**/*_test.py"
+        - "**/test_*.py"
+    metadata:
+      cwe: "CWE-77"
+      owasp: "LLM01:2023 - Prompt Injection"
+      category: "security"
+
+  - id: go-sdk-no-auth-check
+    languages: [go]
+    severity: INFO
+    message: |
+      HTTP request created without Authorization header in same function (CWE-862).
+
+      Attack Vector: Outbound HTTP requests without authentication headers may
+      reach external services unauthenticated, potentially leaking data or
+      allowing unauthorized access if the service relies on bearer tokens.
+
+      Context: This is an audit rule — many internal or health-check requests
+      intentionally omit authentication. Review each match and suppress with
+      "// nosemgrep: go-sdk-no-auth-check" where appropriate.
+
+      Remediation: Set the Authorization header before sending:
+        req, _ := http.NewRequest("GET", url, nil)
+        req.Header.Set("Authorization", "Bearer " + token)
+        client.Do(req)
+    patterns:
+      - pattern: |
+          func $FUNC(...) {
+              ...
+              $REQ, $ERR := http.NewRequest(...)
+              ...
+          }
+      - pattern-not-inside: |
+          func $FUNC(...) {
+              ...
+              $REQ, $ERR := http.NewRequest(...)
+              ...
+              $REQ.Header.Set("Authorization", ...)
+              ...
+          }
+      - pattern-not-inside: |
+          func $FUNC(...) {
+              ...
+              $REQ, $ERR := http.NewRequest(...)
+              ...
+              $REQ.Header.Add("Authorization", ...)
+              ...
+          }
+    metadata:
+      cwe: "CWE-862"
+      category: "security"
+
+  - id: endpoint-missing-rate-limit
+    languages: [python]
+    severity: INFO
+    message: |
+      Endpoint handler without rate limiting decorator (CWE-770).
+
+      Attack Vector: Endpoints without rate limiting are vulnerable to denial-
+      of-service attacks and brute-force attempts. An attacker can exhaust
+      server resources or overwhelm downstream services (databases, LLM APIs)
+      by sending high volumes of requests.
+
+      Context: This is an audit rule — not every endpoint requires rate limiting.
+      Review each match and suppress with "# nosemgrep: endpoint-missing-rate-limit"
+      where appropriate. Prioritize rate limiting on authentication, search,
+      and LLM/inference endpoints.
+
+      Remediation: Add a rate limiter:
+        from flask_limiter import Limiter
+        limiter = Limiter(app)
+
+        @app.route("/api/search")
+        @limiter.limit("10/minute")
+        def search():
+            ...
+    patterns:
+      - pattern-either:
+          - pattern: |
+              @$APP.route(...)
+              def $FUNC(...):
+                  ...
+          - pattern: |
+              @$APP.post(...)
+              def $FUNC(...):
+                  ...
+          - pattern: |
+              @$APP.get(...)
+              def $FUNC(...):
+                  ...
+          - pattern: |
+              @$APP.put(...)
+              def $FUNC(...):
+                  ...
+          - pattern: |
+              @$APP.delete(...)
+              def $FUNC(...):
+                  ...
+      - pattern-not: |
+          @$APP.route(...)
+          @limiter.limit(...)
+          def $FUNC(...):
+              ...
+      - pattern-not: |
+          @$APP.post(...)
+          @limiter.limit(...)
+          def $FUNC(...):
+              ...
+      - pattern-not: |
+          @$APP.get(...)
+          @limiter.limit(...)
+          def $FUNC(...):
+              ...
+      - pattern-not: |
+          @$APP.put(...)
+          @limiter.limit(...)
+          def $FUNC(...):
+              ...
+      - pattern-not: |
+          @$APP.delete(...)
+          @limiter.limit(...)
+          def $FUNC(...):
+              ...
+      - pattern-not: |
+          @$APP.route(...)
+          @slowapi.limit(...)
+          def $FUNC(...):
+              ...
+    metadata:
+      cwe: "CWE-770"
+      category: "security"

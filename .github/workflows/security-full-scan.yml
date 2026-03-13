@@ -9,7 +9,7 @@ name: Security Full Codebase Scan
 # - On-demand: Can be triggered via GitHub UI or gh CLI
 #
 # Simplified Workflow (v2.0):
-# - All 9 security tools always run (no enable/disable toggles)
+# - All 10 security tools always run (no enable/disable toggles)
 # - Advanced options: scan_git_history, test_advisory
 # - Baseline mechanism: Acknowledged findings filtered via .github/config/security-baseline.yaml
 
@@ -459,6 +459,79 @@ jobs:
           retention-days: 30
 
       # ============================================================================
+      # GO SOURCE CODE SECURITY ANALYSIS - Gosec
+      # ============================================================================
+      # Tool: Gosec v2.22.4
+      # Purpose: Go source code security scanner (AST-based)
+      # Analysis: Scans Go source code for common security issues including:
+      #   - SQL injection (G201, G202)
+      #   - Command injection (G204)
+      #   - Path traversal (G304)
+      #   - Weak cryptography (G401, G501)
+      #   - Hardcoded credentials (G101)
+      #   - Integer overflow (G115)
+      #   - Unsafe use of reflect/unsafe packages
+      # Output: JSON for report aggregation + SARIF for GitHub Security tab
+      # Severity filter: medium+ (excludes low/informational noise)
+      # Install: via 'go install' (Go already set up from kube-linter step)
+      #
+      # Why gosec?: Purpose-built Go security scanner with deep AST analysis
+      # Complement: Semgrep covers cross-language patterns, gosec provides Go-specific depth
+
+      - name: Install gosec
+        run: |
+          set -euo pipefail
+          GOSEC_VERSION="v2.22.4"
+          go install github.com/securego/gosec/v2/cmd/gosec@${GOSEC_VERSION}
+          gosec --version
+
+      - name: Run gosec
+        id: gosec
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          set +e
+
+          # Run gosec with JSON output for comprehensive report
+          gosec -severity medium -fmt=json -out=gosec.json ./...
+          JSON_EXIT=$?
+
+          # Run gosec with SARIF output for GitHub Security tab
+          gosec -severity medium -fmt=sarif -out=gosec.sarif ./...
+          SARIF_EXIT=$?
+
+          set -e
+
+          # Validate JSON output was generated
+          if [ ! -s gosec.json ]; then
+            echo "WARNING: gosec.json is missing or empty" >&2
+          fi
+
+          # Validate SARIF output was generated
+          if [ ! -s gosec.sarif ]; then
+            echo "WARNING: gosec.sarif is missing or empty" >&2
+          fi
+
+          # Exit non-zero if either run detected findings (for accurate step outcome)
+          [ $JSON_EXIT -eq 0 ] && [ $SARIF_EXIT -eq 0 ] || exit 1
+        continue-on-error: true
+
+      - name: Upload gosec SARIF results
+        if: always() && hashFiles('gosec.sarif') != ''
+        uses: github/codeql-action/upload-sarif@1b168cd39490f61582a9beae412bb7057a6b2c4e  # v4.31.8
+        with:
+          sarif_file: gosec.sarif
+          category: gosec
+
+      - name: Upload gosec JSON report
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
+        with:
+          name: gosec-report
+          path: gosec.json
+          retention-days: 30
+
+      # ============================================================================
       # COMPREHENSIVE SECURITY REPORT GENERATION
       # ============================================================================
       # Tool: Custom Python report generator (.github/scripts/generate-security-report.py)
@@ -552,6 +625,7 @@ jobs:
           ACTIONLINT_OUTCOME: ${{ steps.actionlint.outcome }}
           KUBELINTER_OUTCOME: ${{ steps.kubelinter.outcome }}
           RBAC_OUTCOME: ${{ steps.rbac_analyzer.outcome }}
+          GOSEC_OUTCOME: ${{ steps.gosec.outcome }}
         run: |
           # Function to extract severity summary from JSON (robust parsing with jq)
           get_severity_badge() {
@@ -706,6 +780,11 @@ jobs:
           severity_summary=$(get_severity_badge "RBAC Analyzer")
           echo "| RBAC Analyzer | Privilege chain analysis | ${status_result%%|*} | ${status_result##*|}${severity_summary} |" >> $GITHUB_STEP_SUMMARY
 
+          # Gosec
+          status_result=$(get_status "$GOSEC_OUTCOME" "gosec.json")
+          severity_summary=$(get_severity_badge "Gosec")
+          echo "| Gosec | Go source code security (AST-based) | ${status_result%%|*} | ${status_result##*|}${severity_summary} |" >> $GITHUB_STEP_SUMMARY
+
           # Overall status
           echo "" >> $GITHUB_STEP_SUMMARY
           if [[ "$GITLEAKS_OUTCOME" == "success" ]] && \
@@ -716,13 +795,14 @@ jobs:
              [[ "$YAMLLINT_OUTCOME" == "success" ]] && \
              [[ "$ACTIONLINT_OUTCOME" == "success" ]] && \
              [[ "$KUBELINTER_OUTCOME" == "success" ]] && \
-             [[ "$RBAC_OUTCOME" == "success" ]]; then
+             [[ "$RBAC_OUTCOME" == "success" ]] && \
+             [[ "$GOSEC_OUTCOME" == "success" ]]; then
             echo "✅ **All security scans passed - no issues found**" >> $GITHUB_STEP_SUMMARY
           else
             # Check if any tools actually failed (vs just found issues)
             has_failures=false
             has_incomplete=false
-            for outcome in "$GITLEAKS_OUTCOME" "$TRUFFLEHOG_OUTCOME" "$SEMGREP_OUTCOME" "$SHELLCHECK_OUTCOME" "$HADOLINT_OUTCOME" "$YAMLLINT_OUTCOME" "$ACTIONLINT_OUTCOME" "$KUBELINTER_OUTCOME" "$RBAC_OUTCOME"; do
+            for outcome in "$GITLEAKS_OUTCOME" "$TRUFFLEHOG_OUTCOME" "$SEMGREP_OUTCOME" "$SHELLCHECK_OUTCOME" "$HADOLINT_OUTCOME" "$YAMLLINT_OUTCOME" "$ACTIONLINT_OUTCOME" "$KUBELINTER_OUTCOME" "$RBAC_OUTCOME" "$GOSEC_OUTCOME"; do
               if [[ "$outcome" == "failure" ]]; then
                 # At least one tool had a non-success outcome (either failed or found issues)
                 has_failures=true

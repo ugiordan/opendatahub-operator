@@ -420,3 +420,36 @@ func GatewayConfigDomainChanged() predicate.Predicate {
 		},
 	}
 }
+
+// ScopedRBACPredicate filters events to only include Roles/RoleBindings managed
+// by the rbacscope library. Pass the result of scoper.ManagedLabels() as the
+// managedLabels parameter to avoid hardcoding label strings.
+func ScopedRBACPredicate(managedLabels map[string]string) predicate.Predicate {
+	isManagedByScoper := func(obj client.Object) bool {
+		objLabels := obj.GetLabels()
+		if objLabels == nil {
+			return false
+		}
+		for k, v := range managedLabels {
+			if objLabels[k] != v {
+				return false
+			}
+		}
+		return true
+	}
+
+	return predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			return false // We don't need to react to creates (we create them ourselves)
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			return isManagedByScoper(e.ObjectNew)
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			return isManagedByScoper(e.Object)
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			return false
+		},
+	}
+}

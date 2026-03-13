@@ -63,6 +63,11 @@ import (
 	ctrlwebhook "sigs.k8s.io/controller-runtime/pkg/webhook"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	"github.com/opendatahub-io/operator-security-runtime/pkg/impersonationguard"
+	"github.com/opendatahub-io/operator-security-runtime/pkg/rbacaudit"
+	"github.com/opendatahub-io/operator-security-runtime/pkg/rbacscope"
+	"github.com/opendatahub-io/operator-security-runtime/pkg/saprotection"
+
 	"github.com/opendatahub-io/opendatahub-operator/v2/api/common"
 	componentApi "github.com/opendatahub-io/opendatahub-operator/v2/api/components/v1alpha1"
 	dscv1 "github.com/opendatahub-io/opendatahub-operator/v2/api/datasciencecluster/v1"
@@ -407,11 +412,15 @@ func main() { //nolint:funlen,maintidx,gocyclo
 		os.Exit(1)
 	}
 
+	// --- operator-security-runtime integration ---
+	secretScoper := setupSecurityRuntime(ctx, mgr)
+
 	if flags.IsDSCIEnabled() {
 		if err = (&dscictrl.DSCInitializationReconciler{
-			Client:   mgr.GetClient(),
-			Scheme:   mgr.GetScheme(),
-			Recorder: mgr.GetEventRecorderFor("dscinitialization-controller"),
+			Client:       mgr.GetClient(),
+			Scheme:       mgr.GetScheme(),
+			Recorder:     mgr.GetEventRecorderFor("dscinitialization-controller"),
+			SecretScoper: secretScoper,
 		}).SetupWithManager(ctx, mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "DSCInitiatlization")
 			os.Exit(1)
@@ -528,6 +537,127 @@ func (l *LeaderElectionRunnableWrapper) Start(ctx context.Context) error {
 
 func (l *LeaderElectionRunnableWrapper) NeedLeaderElection() bool {
 	return true
+}
+
+func setupSecurityRuntime(ctx context.Context, mgr *manager.Manager) *rbacscope.RBACScoper {
+	secLog := ctrl.Log.WithName("security-runtime")
+
+	// 1. RBAC Audit: scan for impersonation and token-request vulnerabilities at startup
+	auditRunnable := LeaderElectionRunnableFunc(func(ctx context.Context) error {
+		secLog.Info("running RBAC audit scan")
+		findings := rbacaudit.AuditImpersonationExposure(ctx, mgr.GetAPIReader())
+		for _, f := range findings {
+			secLog.Info("rbac audit finding",
+				"severity", f.Severity,
+				"category", f.Category,
+				"resource", f.Resource,
+				"description", f.Description,
+			)
+		}
+		if len(findings) == 0 {
+			secLog.Info("rbac audit: no impersonation or token-request vulnerabilities found")
+		}
+		return nil
+	})
+	if err := mgr.Add(auditRunnable); err != nil {
+		secLog.Error(err, "unable to schedule RBAC audit")
+		os.Exit(1)
+	}
+
+	// 2. Impersonation Guard: continuously watch and harden system:aggregate-to-edit ClusterRole
+	if err := (&impersonationguard.ImpersonationGuardReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		secLog.Error(err, "unable to setup impersonation guard controller")
+		os.Exit(1)
+	}
+	secLog.Info("impersonation guard controller registered")
+
+	// 3. SA Protection: webhook preventing unauthorized use of the operator's ServiceAccount
+	operatorNs, err := cluster.GetOperatorNamespace()
+	if err != nil {
+		secLog.Error(err, "unable to get operator namespace for SA protection")
+		os.Exit(1)
+	}
+	if err := saprotection.SetupPodWebhookWithManager(mgr, []saprotection.ProtectedIdentity{
+		{
+			Namespace:          operatorNs,
+			ServiceAccountName: "controller-manager",
+		},
+	}); err != nil {
+		secLog.Error(err, "unable to setup SA protection webhook")
+		os.Exit(1)
+	}
+	secLog.Info("SA protection webhook registered", "namespace", operatorNs, "serviceAccount", "controller-manager")
+
+	// 4. RBAC Scoper: dynamically scope secrets access per-namespace.
+	// Instead of cluster-wide secrets access via static ClusterRole, create
+	// namespace-scoped Roles/RoleBindings only in namespaces where the operator
+	// actually needs secrets. The DSCI reconciler calls EnsureAccessInNamespace
+	// for each target namespace (operator NS, applications NS, monitoring NS,
+	// openshift-ingress).
+	secretRules, err := rbacscope.NewAllowedRules(rbacv1.PolicyRule{
+		APIGroups: []string{""},
+		Resources: []string{"secrets"},
+		Verbs:     []string{"get", "list", "watch", "create", "update", "patch", "delete"},
+	})
+	if err != nil {
+		secLog.Error(err, "unable to create secret AllowedRules")
+		os.Exit(1)
+	}
+
+	secretScoper, err := rbacscope.NewRBACScoper(
+		mgr.GetClient(),
+		rbacscope.OperatorIdentity{
+			Name:           "opendatahub-operator",
+			ServiceAccount: "controller-manager",
+			Namespace:      operatorNs,
+		},
+		secretRules,
+		rbacscope.WithScheme(mgr.GetScheme()),
+		// We override the default denied namespaces (which include "openshift-" prefix)
+		// because we need access to openshift-ingress for TLS certificate management.
+		// All other sensitive openshift-* namespaces are explicitly denied.
+		rbacscope.WithDeniedNamespaces(
+			// Kubernetes system namespaces
+			"kube-system", "kube-public", "kube-node-lease", "default",
+			// OpenShift sensitive namespaces (explicitly denied since we can't use
+			// the default "openshift-" prefix — we need openshift-ingress for TLS certs)
+			"openshift-config",
+			"openshift-config-managed",
+			"openshift-etcd",
+			"openshift-kube-apiserver",
+			"openshift-kube-controller-manager",
+			"openshift-kube-scheduler",
+			"openshift-machine-api",
+			"openshift-machine-config-operator",
+			"openshift-monitoring",
+			"openshift-network-operator",
+			"openshift-sdn",
+			"openshift-ovn-kubernetes",
+			"openshift-multus",
+			"openshift-dns",
+			"openshift-image-registry",
+			"openshift-authentication",
+			"openshift-oauth-apiserver",
+			"openshift-apiserver",
+			"openshift-controller-manager",
+			"openshift-cloud-credential-operator",
+			"openshift-cluster-storage-operator",
+			"openshift-service-ca",
+			"openshift-service-ca-operator",
+			"openshift-console",
+			"openshift-console-operator",
+		),
+	)
+	if err != nil {
+		secLog.Error(err, "unable to create secrets RBAC scoper")
+		os.Exit(1)
+	}
+	secLog.Info("secrets RBAC scoper initialized (per-namespace scoping)")
+
+	return secretScoper
 }
 
 func getCommonCache(platform common.Platform) (map[string]cache.Config, error) {

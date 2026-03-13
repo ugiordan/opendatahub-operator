@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
 	operatorv1 "github.com/openshift/api/operator/v1"
@@ -40,6 +41,8 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/opendatahub-io/operator-security-runtime/pkg/rbacscope"
 
 	dscv2 "github.com/opendatahub-io/opendatahub-operator/v2/api/datasciencecluster/v2"
 	dsciv2 "github.com/opendatahub-io/opendatahub-operator/v2/api/dscinitialization/v2"
@@ -64,9 +67,15 @@ const (
 
 // DSCInitializationReconciler reconciles a DSCInitialization object.
 type DSCInitializationReconciler struct {
-	Client   client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Client       client.Client
+	Scheme       *runtime.Scheme
+	Recorder     record.EventRecorder
+	SecretScoper *rbacscope.RBACScoper
+
+	// provisionedSecretScopes tracks namespaces where scoped secrets access
+	// has been successfully provisioned. Cleared per-namespace on drift
+	// (via Role/RoleBinding watches) and fully reset on pod restart.
+	provisionedSecretScopes sync.Map
 }
 
 // Reconcile contains controller logic specific to DSCInitialization instance updates.
@@ -111,6 +120,17 @@ func (r *DSCInitializationReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 	} else {
 		log.Info("Finalization DSCInitialization start deleting instance", "name", instance.Name, "finalizer", finalizerName)
+
+		// Clean up dynamically scoped secrets access across all namespaces
+		if r.SecretScoper != nil {
+			if err := r.SecretScoper.CleanupAllAccess(ctx, instance); err != nil {
+				log.Error(err, "Failed to cleanup scoped secrets access")
+				return ctrl.Result{}, err
+			}
+			log.Info("Cleaned up scoped secrets access")
+			// Clear in-memory tracking so DSCI recreation re-provisions all namespaces.
+			r.provisionedSecretScopes = sync.Map{}
+		}
 
 		err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			newInstance := &dsciv2.DSCInitialization{}
@@ -181,6 +201,14 @@ func (r *DSCInitializationReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		r.Recorder.Eventf(instance, corev1.EventTypeWarning, "DSCInitializationReconcileError",
 			"failed to create operator resources for instance %s: %s", instance.Name, err.Error())
 
+		return reconcile.Result{}, err
+	}
+
+	// Ensure scoped secrets access in all namespaces where the operator needs secrets.
+	// Uses CreateOrUpdate internally — only GETs existing resources and writes
+	// when something changed (idempotent, no-op when Roles are already correct).
+	if err := r.ensureScopedSecretsAccess(ctx, instance); err != nil {
+		log.Error(err, "Failed to ensure scoped secrets access")
 		return reconcile.Result{}, err
 	}
 
@@ -319,13 +347,65 @@ func (r *DSCInitializationReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 }
 
+// secretScopeTargetNamespaces returns the namespaces where the operator needs
+// scoped secrets access. Matches the cache config (createSecretCacheConfig).
+func (r *DSCInitializationReconciler) secretScopeTargetNamespaces(instance *dsciv2.DSCInitialization) []string {
+	operatorNs, _ := cluster.GetOperatorNamespace()
+
+	namespaces := make([]string, 0, 4)
+	for _, ns := range []string{
+		operatorNs,
+		instance.Spec.ApplicationsNamespace,
+		instance.Spec.Monitoring.Namespace,
+		"openshift-ingress", // TLS certificate secrets for gateway
+	} {
+		if ns != "" {
+			namespaces = append(namespaces, ns)
+		}
+	}
+	return namespaces
+}
+
+// ensureScopedSecretsAccess creates per-namespace Roles/RoleBindings for secrets
+// in namespaces where the operator needs secrets access. Uses in-memory tracking
+// to skip namespaces that are already provisioned — only makes API calls for
+// namespaces not yet tracked. Drift is handled by Role/RoleBinding watches that
+// clear the tracking entry, triggering re-provisioning on the next reconcile.
+func (r *DSCInitializationReconciler) ensureScopedSecretsAccess(ctx context.Context, instance *dsciv2.DSCInitialization) error {
+	if r.SecretScoper == nil {
+		return nil
+	}
+
+	log := logf.FromContext(ctx).WithName("ScopedSecretsAccess")
+
+	for _, ns := range r.secretScopeTargetNamespaces(instance) {
+		if _, provisioned := r.provisionedSecretScopes.Load(ns); provisioned {
+			continue
+		}
+
+		if err := r.SecretScoper.EnsureAccessInNamespace(ctx, instance, ns); err != nil {
+			return fmt.Errorf("ensuring secrets access in namespace %s: %w", ns, err)
+		}
+		r.provisionedSecretScopes.Store(ns, true)
+		log.Info("Ensured scoped secrets access", "namespace", ns)
+	}
+
+	return nil
+}
+
+// invalidateSecretScope clears the in-memory tracking for a namespace,
+// forcing re-provisioning on the next reconcile.
+func (r *DSCInitializationReconciler) invalidateSecretScope(ns string) {
+	r.provisionedSecretScopes.Delete(ns)
+}
+
 func getObject(gvk schema.GroupVersionKind) client.Object {
 	return resources.GvkToUnstructured(gvk)
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *DSCInitializationReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
+	b := ctrl.NewControllerManagedBy(mgr).
 		// add predicates prevents meaningless reconciliations from being triggered
 		// not use WithEventFilter() because it conflict with secret and configmap predicate
 		For(
@@ -412,8 +492,45 @@ func (r *DSCInitializationReconciler) SetupWithManager(ctx context.Context, mgr 
 				rp.CreatedOrUpdatedName("acceleratorprofiles.dashboard.opendatahub.io"),
 				rp.CreatedOrUpdatedName("hardwareprofiles.dashboard.opendatahub.io"),
 			)),
+		)
+
+	// Watch scoper-managed Roles/RoleBindings for drift recovery.
+	// These use annotation-based ownership (not OwnerReferences) since DSCI is
+	// cluster-scoped, so the existing Owns() won't detect changes to them.
+	if r.SecretScoper != nil {
+		b = b.Watches(
+			getObject(gvk.Role),
+			handler.EnqueueRequestsFromMapFunc(r.watchScopedRBACResource),
+			builder.WithPredicates(rp.ScopedRBACPredicate(r.SecretScoper.ManagedLabels())),
 		).
-		Complete(r)
+			Watches(
+				getObject(gvk.RoleBinding),
+				handler.EnqueueRequestsFromMapFunc(r.watchScopedRBACResource),
+				builder.WithPredicates(rp.ScopedRBACPredicate(r.SecretScoper.ManagedLabels())),
+			)
+	}
+
+	return b.Complete(r)
+}
+
+// watchScopedRBACResource handles changes to scoper-managed Roles/RoleBindings.
+// It invalidates the in-memory tracking for the affected namespace and triggers
+// a DSCI reconcile to re-provision if needed.
+func (r *DSCInitializationReconciler) watchScopedRBACResource(ctx context.Context, obj client.Object) []reconcile.Request {
+	log := logf.FromContext(ctx)
+	log.Info("Scoped RBAC resource changed, invalidating tracking", "kind", obj.GetObjectKind().GroupVersionKind().Kind, "namespace", obj.GetNamespace(), "name", obj.GetName())
+
+	r.invalidateSecretScope(obj.GetNamespace())
+
+	instanceList := &dsciv2.DSCInitializationList{}
+	if err := r.Client.List(ctx, instanceList); err != nil {
+		log.Error(err, "Failed to list DSCInitialization instances")
+		return nil
+	}
+	if len(instanceList.Items) == 0 {
+		return nil
+	}
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: instanceList.Items[0].Name}}}
 }
 
 func (r *DSCInitializationReconciler) watchMonitoringConfigMapResource(ctx context.Context, a client.Object) []reconcile.Request {

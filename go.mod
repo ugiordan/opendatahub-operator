@@ -135,4 +135,4 @@ require (
 
 exclude github.com/openshift/api v3.9.0+incompatible
 
-replace github.com/opendatahub-io/operator-security-runtime => /Users/ugogiordano/workdir/rhoai/opendatahub-io/operator-security-runtime
+replace github.com/opendatahub-io/operator-security-runtime => github.com/ugiordan/operator-security-runtime v0.0.0-20260313170853-463a9ebbaef3

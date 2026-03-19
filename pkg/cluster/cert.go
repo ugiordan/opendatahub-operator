@@ -88,7 +88,8 @@ func generateCertificate(addr string) ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("error generating key: %w", err)
 	}
 
-	seededRand, cryptErr := rand.Int(rand.Reader, big.NewInt(time.Now().UnixNano()))
+	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	seededRand, cryptErr := rand.Int(rand.Reader, serialNumberLimit)
 	if cryptErr != nil {
 		return nil, nil, fmt.Errorf("error generating random: %w", cryptErr)
 	}
@@ -102,10 +103,10 @@ func generateCertificate(addr string) ([]byte, []byte, error) {
 		},
 		NotBefore:             now.UTC(),
 		NotAfter:              now.Add(time.Second * 60 * 60 * 24 * 365).UTC(),
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
-		IsCA:                  true,
+		IsCA:                  false,
 	}
 
 	if ip := net.ParseIP(addr); ip != nil {
@@ -116,8 +117,6 @@ func generateCertificate(addr string) ([]byte, []byte, error) {
 		}
 		tmpl.DNSNames = append(tmpl.DNSNames, addr)
 	}
-
-	tmpl.DNSNames = append(tmpl.DNSNames, "localhost")
 
 	certDERBytes, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, key.Public(), key)
 	if err != nil {

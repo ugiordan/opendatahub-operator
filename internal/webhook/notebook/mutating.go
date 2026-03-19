@@ -83,8 +83,6 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		return admission.Allowed("Object marked for deletion, skipping connection logic")
 	}
 
-	var resp admission.Response
-
 	switch req.Operation {
 	case admissionv1.Create, admissionv1.Update:
 		validationResp, shouldInject, notebookSecretRefs := w.validateNotebookConnectionAnnotation(ctx, notebook, &req)
@@ -113,11 +111,11 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 			return admission.PatchResponseFromRaw(req.Object.Raw, marshaledObj)
 		}
 
-	default:
-		resp = admission.Allowed(fmt.Sprintf("Operation %s on %s allowed", req.Operation, req.Kind.Kind))
-	}
+		return admission.Allowed(fmt.Sprintf("Connection injection not needed for %s in namespace %s", req.Kind.Kind, req.Namespace))
 
-	return resp
+	default:
+		return admission.Allowed(fmt.Sprintf("Operation %s on %s allowed", req.Operation, req.Kind.Kind))
+	}
 }
 
 // validateNotebookConnectionAnnotation validates the connection annotation "opendatahub.io/connections"

@@ -37,8 +37,8 @@ import (
 )
 
 // caRootDuration is the validity period of the root CA certificate.
-// This value is intentionally long. The renewal strategy will be defined in future changes.
-const caRootDuration = "876000h"
+// cert-manager schedules renewal at 2/3 of this duration by default (~6.6 years).
+const caRootDuration = "87600h"
 
 // Core cert-manager CRD resource names.
 const (

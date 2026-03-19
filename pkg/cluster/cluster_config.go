@@ -188,6 +188,9 @@ func getOCPVersion(ctx context.Context, c client.Client) (version.OperatorVersio
 	}, clusterVersion); err != nil {
 		return version.OperatorVersion{}, fmt.Errorf("unable to get OCP version: %w", err)
 	}
+	if len(clusterVersion.Status.History) == 0 {
+		return version.OperatorVersion{}, fmt.Errorf("OCP ClusterVersion has no version history")
+	}
 	v, err := semver.ParseTolerant(clusterVersion.Status.History[0].Version)
 	if err != nil {
 		return version.OperatorVersion{}, fmt.Errorf("unable to parse OCP version: %w", err)

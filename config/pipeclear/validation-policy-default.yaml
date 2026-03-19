@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pipeclear-validation-policy
+  namespace: opendatahub
+data:
+  policy.yaml: |
+    version: "1"
+    rules:
+      blockMutableTags: true
+      allowedRegistries:
+        - registry.redhat.io
+        - registry.access.redhat.com
+        - quay.io
+        - ghcr.io
+      maxTasksPerPipeline: 100
+      maxResourceRequests:
+        memory: "128Gi"
+        cpu: "64"
+        nvidia.com/gpu: "8"
+      blockPrivilegedContainers: true
+      blockHostMounts: true

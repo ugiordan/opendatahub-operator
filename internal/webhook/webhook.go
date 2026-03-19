@@ -18,6 +18,7 @@ import (
 	hardwareprofilewebhook "github.com/opendatahub-io/opendatahub-operator/v2/internal/webhook/hardwareprofile"
 	monitoringwebhook "github.com/opendatahub-io/opendatahub-operator/v2/internal/webhook/monitoring"
 	notebookwebhook "github.com/opendatahub-io/opendatahub-operator/v2/internal/webhook/notebook"
+	pipeclearwebhook "github.com/opendatahub-io/opendatahub-operator/v2/internal/webhook/pipeclear"
 	serving "github.com/opendatahub-io/opendatahub-operator/v2/internal/webhook/serving"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/utils/flags"
 )
@@ -44,6 +45,9 @@ func RegisterAllWebhooks(mgr ctrl.Manager) error {
 		}},
 		// NOTE: kueue validating webhook is disabled. To re-enable, uncomment the entry below.
 		// {name: "kueue", register: kueuewebhook.RegisterWebhooks, disabled: func() bool { return !cr.IsEnabled(componentApi.KueueComponentName) }},
+		{name: "pipeclear", register: pipeclearwebhook.RegisterWebhooks, disabled: func() bool {
+			return !cr.IsEnabled(componentApi.DataSciencePipelinesComponentName)
+		}},
 		{name: "monitoring", register: monitoringwebhook.RegisterWebhooks, disabled: func() bool { return !sr.IsEnabled(serviceApi.MonitoringServiceName) }},
 		{name: "serving", register: serving.RegisterWebhooks, disabled: func() bool { return !cr.IsEnabled(componentApi.KserveComponentName) }},
 		{name: "notebook", register: notebookwebhook.RegisterWebhooks, disabled: func() bool { return !cr.IsEnabled(componentApi.WorkbenchesComponentName) }},

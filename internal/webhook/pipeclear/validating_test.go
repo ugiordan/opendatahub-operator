@@ -2,6 +2,7 @@ package pipeclear_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	admissionv1 "k8s.io/api/admission/v1"
@@ -246,9 +247,9 @@ func TestPipeClearWebhook_AllowNonCreateOperations(t *testing.T) {
 	g.Expect(resp.Allowed).To(BeTrue())
 }
 
-// TestPipeClearWebhook_WarnOnDockerIO tests that a PipelineVersion with an image from docker.io
-// is allowed but returns a warning.
-func TestPipeClearWebhook_WarnOnDockerIO(t *testing.T) {
+// TestPipeClearWebhook_DenyDisallowedRegistry tests that a PipelineVersion with an image from
+// a non-allowed registry is denied when AllowedRegistries is set.
+func TestPipeClearWebhook_DenyDisallowedRegistry(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
 	ctx := t.Context()
@@ -259,6 +260,10 @@ func TestPipeClearWebhook_WarnOnDockerIO(t *testing.T) {
 	validator := &pipeclearwebhook.Validator{
 		Name:    "test-validator",
 		Decoder: decoder,
+		Policy: &pipeclearwebhook.PolicyConfig{
+			BlockMutableTags:  true,
+			AllowedRegistries: []string{"registry.redhat.io", "quay.io"},
+		},
 	}
 
 	obj := newPipelineVersion("dockerio-pipeline-v1", map[string]interface{}{
@@ -272,7 +277,115 @@ func TestPipeClearWebhook_WarnOnDockerIO(t *testing.T) {
 	req := newAdmissionRequest(t, admissionv1.Create, obj)
 	resp := validator.Handle(ctx, req)
 
+	g.Expect(resp.Allowed).To(BeFalse())
+	g.Expect(resp.Result.Message).To(ContainSubstring("not in allowed list"))
+}
+
+// TestPipeClearWebhook_AllowWithAllowedRegistry tests that a PipelineVersion with an image from
+// an allowed registry is permitted when AllowedRegistries is set.
+func TestPipeClearWebhook_AllowWithAllowedRegistry(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+	ctx := t.Context()
+	sch, err := scheme.New()
+	g.Expect(err).ToNot(HaveOccurred())
+
+	decoder := admission.NewDecoder(sch)
+	validator := &pipeclearwebhook.Validator{
+		Name:    "test-validator",
+		Decoder: decoder,
+		Policy: &pipeclearwebhook.PolicyConfig{
+			BlockMutableTags:  true,
+			AllowedRegistries: []string{"registry.redhat.io", "quay.io"},
+		},
+	}
+
+	obj := newPipelineVersion("allowed-registry-v1", map[string]interface{}{
+		"exec-train": map[string]interface{}{
+			"container": map[string]interface{}{
+				"image": "registry.redhat.io/ubi9/python-311:1.0",
+			},
+		},
+	})
+
+	req := newAdmissionRequest(t, admissionv1.Create, obj)
+	resp := validator.Handle(ctx, req)
+
+	g.Expect(resp.Allowed).To(BeTrue())
+}
+
+// TestPipeClearWebhook_DenyTooManyTasks tests that a PipelineVersion with more executors than
+// MaxTasksPerPipeline is denied.
+func TestPipeClearWebhook_DenyTooManyTasks(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+	ctx := t.Context()
+	sch, err := scheme.New()
+	g.Expect(err).ToNot(HaveOccurred())
+
+	decoder := admission.NewDecoder(sch)
+	validator := &pipeclearwebhook.Validator{
+		Name:    "test-validator",
+		Decoder: decoder,
+		Policy: &pipeclearwebhook.PolicyConfig{
+			MaxTasksPerPipeline: 3,
+		},
+	}
+
+	// Create 4 executors to exceed the limit of 3
+	executors := map[string]interface{}{}
+	for i := 0; i < 4; i++ {
+		executors[fmt.Sprintf("exec-%d", i)] = map[string]interface{}{
+			"container": map[string]interface{}{
+				"image": fmt.Sprintf("registry.redhat.io/ubi9/python-311:%d.0", i),
+			},
+		}
+	}
+
+	obj := newPipelineVersion("too-many-tasks-v1", executors)
+
+	req := newAdmissionRequest(t, admissionv1.Create, obj)
+	resp := validator.Handle(ctx, req)
+
+	g.Expect(resp.Allowed).To(BeFalse())
+	g.Expect(resp.Result.Message).To(ContainSubstring("exceeding maximum of 3"))
+}
+
+// TestPipeClearWebhook_DefaultPolicyUsed tests that when Policy is nil, the DefaultPolicy is used.
+func TestPipeClearWebhook_DefaultPolicyUsed(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+	ctx := t.Context()
+	sch, err := scheme.New()
+	g.Expect(err).ToNot(HaveOccurred())
+
+	decoder := admission.NewDecoder(sch)
+	validator := &pipeclearwebhook.Validator{
+		Name:    "test-validator",
+		Decoder: decoder,
+		// Policy is nil - DefaultPolicy should be used
+	}
+
+	// Use an image with :latest tag - default policy has BlockMutableTags=true
+	obj := newPipelineVersion("default-policy-v1", map[string]interface{}{
+		"exec-train": map[string]interface{}{
+			"container": map[string]interface{}{
+				"image": "registry.redhat.io/ubi9/python-311:latest",
+			},
+		},
+	})
+
+	req := newAdmissionRequest(t, admissionv1.Create, obj)
+	resp := validator.Handle(ctx, req)
+
+	// Should be allowed with a mutable tag warning (default policy warns but doesn't deny)
 	g.Expect(resp.Allowed).To(BeTrue())
 	g.Expect(resp.Warnings).ToNot(BeEmpty())
-	g.Expect(resp.Warnings[0]).To(ContainSubstring("docker.io"))
+	g.Expect(resp.Warnings[0]).To(ContainSubstring("mutable tag"))
+
+	// Verify default policy allows all registries (AllowedRegistries is nil)
+	defaultPolicy := pipeclearwebhook.DefaultPolicy()
+	g.Expect(defaultPolicy.AllowedRegistries).To(BeNil())
+	g.Expect(defaultPolicy.MaxTasksPerPipeline).To(Equal(100))
+	g.Expect(defaultPolicy.BlockMutableTags).To(BeTrue())
 }

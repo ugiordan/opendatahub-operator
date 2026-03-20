@@ -19,32 +19,26 @@ import (
 	webhookutils "github.com/opendatahub-io/opendatahub-operator/v2/pkg/webhook"
 )
 
+// failurePolicy=ignore is intentional for MVP: PipeClear is a new, unproven webhook and should not
+// block cluster-wide pipeline operations if the webhook itself fails. This should be revisited
+// once the webhook is proven stable in production.
+//
 // +kubebuilder:webhook:path=/validate-pipeclear,mutating=false,failurePolicy=ignore,sideEffects=None,groups=pipelines.kubeflow.org,resources=pipelineversions,verbs=create,versions=v2beta1,name=pipeclear-validator.opendatahub.io,admissionReviewVersions=v1
 //nolint:lll
 
 // PolicyConfig defines the validation rules.
 type PolicyConfig struct {
-	BlockMutableTags          bool
-	AllowedRegistries         []string
-	MaxTasksPerPipeline       int
-	MaxMemoryRequest          string // e.g. "128Gi"
-	MaxCPURequest             string // e.g. "64"
-	MaxGPURequest             int
-	BlockPrivilegedContainers bool
-	BlockHostMounts           bool
+	BlockMutableTags    bool
+	AllowedRegistries   []string
+	MaxTasksPerPipeline int
 }
 
 // DefaultPolicy returns the default validation policy.
 func DefaultPolicy() *PolicyConfig {
 	return &PolicyConfig{
-		BlockMutableTags:          true,
-		AllowedRegistries:         nil, // nil means all registries allowed
-		MaxTasksPerPipeline:       100,
-		MaxMemoryRequest:          "128Gi",
-		MaxCPURequest:             "64",
-		MaxGPURequest:             8,
-		BlockPrivilegedContainers: true,
-		BlockHostMounts:           true,
+		BlockMutableTags:    true,
+		AllowedRegistries:   nil, // nil means all registries allowed
+		MaxTasksPerPipeline: 100,
 	}
 }
 

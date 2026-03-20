@@ -3,6 +3,8 @@
 package pipeclear
 
 import (
+	"fmt"
+
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -15,6 +17,10 @@ import (
 // Returns:
 //   - error: Any error encountered during webhook registration.
 func RegisterWebhooks(mgr ctrl.Manager) error {
+	if mgr == nil {
+		return fmt.Errorf("manager must not be nil")
+	}
+
 	if err := (&Validator{
 		Client:  mgr.GetAPIReader(),
 		Decoder: admission.NewDecoder(mgr.GetScheme()),

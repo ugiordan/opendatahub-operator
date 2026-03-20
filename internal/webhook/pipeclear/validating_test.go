@@ -351,6 +351,17 @@ func TestPipeClearWebhook_DenyTooManyTasks(t *testing.T) {
 	g.Expect(resp.Result.Message).To(ContainSubstring("exceeding maximum of 3"))
 }
 
+// TestPipeClearWebhook_RegisterWebhooksNilManager tests that RegisterWebhooks returns an error
+// when a nil manager is passed.
+func TestPipeClearWebhook_RegisterWebhooksNilManager(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	err := pipeclearwebhook.RegisterWebhooks(nil)
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("manager must not be nil"))
+}
+
 // TestPipeClearWebhook_DefaultPolicyUsed tests that when Policy is nil, the DefaultPolicy is used.
 func TestPipeClearWebhook_DefaultPolicyUsed(t *testing.T) {
 	t.Parallel()

@@ -54,9 +54,10 @@ func WithError(err error) Option {
 }
 
 type Manager struct {
-	happy      string
-	dependents []string
-	accessor   common.ConditionsAccessor
+	happy       string
+	dependents  []string
+	accessor    common.ConditionsAccessor
+	activeTypes map[string]struct{}
 }
 
 func NewManager(accessor common.ConditionsAccessor, happy string, dependents ...string) *Manager {
@@ -141,6 +142,10 @@ func (r *Manager) GetCondition(t string) *common.Condition {
 func (r *Manager) SetCondition(cond common.Condition) {
 	if r.accessor == nil {
 		return
+	}
+
+	if r.activeTypes != nil {
+		r.activeTypes[cond.Type] = struct{}{}
 	}
 
 	if !SetStatusCondition(r.accessor, cond) {
@@ -312,12 +317,36 @@ func (r *Manager) findUnhappyDependent() *common.Condition {
 	return nil
 }
 
-// Reset clears all conditions managed by the Manager.
+// Reset prepares the Manager for a new reconciliation cycle. It
+// snapshots the current conditions, clears the list, then re-seeds
+// it from the snapshot so that SetStatusCondition's built-in
+// equals() check can detect unchanged conditions and preserve
+// their LastTransitionTime values.
 //
-// It achieves this by setting an empty slice of common.Condition
-// in the underlying accessor.
+// Call CleanupStaleConditions after all actions have run to remove
+// conditions that were not re-set during this cycle.
 func (r *Manager) Reset() {
-	r.accessor.SetConditions([]common.Condition{})
+	snapshot := slices.Clone(r.accessor.GetConditions())
+	r.accessor.SetConditions(snapshot)
+	r.activeTypes = make(map[string]struct{})
+}
+
+// CleanupStaleConditions removes conditions that were not re-set
+// during this reconciliation cycle (e.g. disabled components).
+func (r *Manager) CleanupStaleConditions() {
+	if r.activeTypes == nil {
+		return
+	}
+
+	for _, c := range slices.Clone(r.accessor.GetConditions()) {
+		if c.Type == r.happy {
+			continue
+		}
+
+		if _, active := r.activeTypes[c.Type]; !active {
+			RemoveStatusCondition(r.accessor, c.Type)
+		}
+	}
 }
 
 // Sort arranges the conditions retrieved from the accessor based on the following rules:

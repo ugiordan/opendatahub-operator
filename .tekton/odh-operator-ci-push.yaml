@@ -1,7 +1,6 @@
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
-#test4
   annotations:
     build.appstudio.openshift.io/repo: https://github.com/opendatahub-io/opendatahub-operator?rev={{revision}}
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
@@ -11,13 +10,13 @@ metadata:
     build.appstudio.openshift.io/build-nudge-files: "bundle/bundle-patch.yaml"
     pipelinesascode.tekton.dev/on-cel-expression: |
       "true" == "false"
-  creationTimestamp: null
+  creationTimestamp:
   labels:
     appstudio.openshift.io/application: opendatahub-builds
     appstudio.openshift.io/component: odh-operator-ci
     pipelines.appstudio.openshift.io/type: build
   name: odh-operator-ci-on-push
-  namespace: rhoai-tenant
+  namespace: rhoai-private-tenant
 spec:
   params:
   - name: git-url
@@ -25,7 +24,7 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/opendatahub/opendatahub-operator:odh-stable
+    value: quay.io/opendatahub/opendatahub-operator:{{target_branch}}
   - name: dockerfile
     value: Dockerfiles/rhoai.Dockerfile
   - name: build-version-tag
@@ -39,13 +38,17 @@ spec:
   - name: build-args
     value:
     - BUILD_TYPE=CI
+  - name: rhoai-version
+    value: ""
+  - name: disable-slack-notifications
+    value: "true"
   pipelineRef:
     resolver: git
     params:
     - name: url
       value: https://github.com/opendatahub-io/odh-konflux-central.git
     - name: revision
-      value: 'main'
+      value: '{{ target_branch }}'
     - name: pathInRepo
       value: pipeline/multi-arch-operator-build.yaml
   taskRunTemplate:

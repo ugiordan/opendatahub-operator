@@ -58,9 +58,9 @@ relatedImages:
 - name: RELATED_IMAGE_ODH_KUBERAY_OPERATOR_CONTROLLER_IMAGE
   value: quay.io/rhoai/odh-kuberay-operator-controller-rhel9@sha256:328c1c7c099acbc7974516f0f02f2eea7c3fc79ad8c5744c8c1bc83a6b6c4493
 - name: RELATED_IMAGE_ODH_KUBE_AUTH_PROXY_IMAGE
-  value: quay.io/rhoai/odh-kube-auth-proxy-rhel9@sha256:9015e28e0f6040757fd89e8f320e150a1f45e31eee61d0952d04d8b93d72c64f
+  value: quay.io/rhoai/odh-kube-auth-proxy-rhel9@sha256:9c23188a4aae5c3ed01f7c5db34699ef48e5fb9af12bf83d4e25c5618fa714cb
 - name: RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE
-  value: quay.io/rhoai/odh-kube-rbac-proxy-rhel9@sha256:632d5c625d4b7733bf58e0d4f6cc6cd29ad7bd6df06e84723d519215a1a70382
+  value: quay.io/rhoai/odh-kube-rbac-proxy-rhel9@sha256:d046360f3df8973c85e36b6bf1e3a6e9b163eeaf03c216b15e39e223503c95c7
 - name: RELATED_IMAGE_ODH_LATENCY_PREDICTOR_PREDICTION_IMAGE
   value: quay.io/rhoai/odh-latency-predictor-prediction-rhel9@sha256:fb6562f7e3ae8888d864831f4323a5c846dfe631bf816565d3524c24f897e983
 - name: RELATED_IMAGE_ODH_LATENCY_PREDICTOR_TEST_IMAGE
@@ -124,17 +124,17 @@ relatedImages:
 - name: RELATED_IMAGE_ODH_MODEL_SERVING_API_IMAGE
   value: quay.io/rhoai/odh-model-serving-api-rhel9@sha256:0f4cd9b8306a0a077d5b9eccc755db6cb5275b1ba25def29d596c08360343703
 - name: RELATED_IMAGE_ODH_MOD_ARCH_AGENT_OPS_IMAGE
-  value: quay.io/rhoai/odh-mod-arch-agent-ops-rhel9@sha256:d6dbac1330cf8db1992e32cf3a1f5bcc0312f3f68e2d1b5f0e5e86a7fa1397b2
+  value: quay.io/rhoai/odh-mod-arch-agent-ops-rhel9@sha256:453f9b9983a3047445e42edc033b7f8fe14eacbf268c762244ed2313ad618954
 - name: RELATED_IMAGE_ODH_MOD_ARCH_AUTOML_IMAGE
   value: quay.io/rhoai/odh-mod-arch-automl-rhel9@sha256:67c42968b6882c2c4514a1a9437d00666b6301f69bc08e1baaa001b838605b5c
 - name: RELATED_IMAGE_ODH_MOD_ARCH_AUTORAG_IMAGE
   value: quay.io/rhoai/odh-mod-arch-autorag-rhel9@sha256:9e52eda39704b9910f699da7e62ccc6a4c041be1deb709e3c32ca5556a6faafd
 - name: RELATED_IMAGE_ODH_MOD_ARCH_EVAL_HUB_IMAGE
-  value: quay.io/rhoai/odh-mod-arch-eval-hub-rhel9@sha256:32919ee28bc6a4e0596f83c2951d46ab1d10e0dde6323dae9214ee88586e43a9
+  value: quay.io/rhoai/odh-mod-arch-eval-hub-rhel9@sha256:d0a13b46542f1570de939ed070e82f3674746ed91a8a23efec35b00c3bd1196d
 - name: RELATED_IMAGE_ODH_MOD_ARCH_GEN_AI_IMAGE
-  value: quay.io/rhoai/odh-mod-arch-gen-ai-rhel9@sha256:3b8e1c8eec8a53b5dd86a6092898f469f7469bb4be63d55ed64b834454ff1cdc
+  value: quay.io/rhoai/odh-mod-arch-gen-ai-rhel9@sha256:6a8d222f368843d72285cdd8373a819425dda7a21d8696a925becb16a588e9e5
 - name: RELATED_IMAGE_ODH_MOD_ARCH_MAAS_IMAGE
-  value: quay.io/rhoai/odh-mod-arch-maas-rhel9@sha256:ad68295f8a49e6f40cf854e158e32ef9bb7b52f3b9c3dbbd47494bd5f06151d4
+  value: quay.io/rhoai/odh-mod-arch-maas-rhel9@sha256:3c13faf4b615c2ec9f293c6700233d8b359a114ee3d47ee93a45cf530ecb0b37
 - name: RELATED_IMAGE_ODH_MOD_ARCH_MLFLOW_IMAGE
   value: quay.io/rhoai/odh-mod-arch-mlflow-rhel9@sha256:dd1088ee73a9f5ef4d9b5a98d78cce28c4772bf681e14fee1c3d15216e7ca7ed
 - name: RELATED_IMAGE_ODH_MOD_ARCH_MODEL_REGISTRY_IMAGE
@@ -236,4 +236,4 @@ relatedImages:
 - name: RELATED_IMAGE_ODH_WORKLOAD_VARIANT_AUTOSCALER_CONTROLLER_IMAGE
   value: quay.io/rhoai/odh-workload-variant-autoscaler-controller-rhel9@sha256:0d0ea9f873231e87d0ea5ccd10836de7c3be8422d298202d94b79b67f03fdc90
 - name: RELATED_IMAGE_OSE_KUBE_RBAC_PROXY_IMAGE
-  value: quay.io/rhoai/odh-kube-auth-proxy-rhel9@sha256:9015e28e0f6040757fd89e8f320e150a1f45e31eee61d0952d04d8b93d72c64f
+  value: quay.io/rhoai/odh-kube-auth-proxy-rhel9@sha256:9c23188a4aae5c3ed01f7c5db34699ef48e5fb9af12bf83d4e25c5618fa714cb

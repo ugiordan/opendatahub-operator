@@ -8,6 +8,7 @@ spec:
   dbBackend: postgresql
   fileStorage:
     s3:
+      bucket: llm-d-batch-gateway
       region: us-east-1
       endpoint: http://minio.default.svc.cluster.local:9000
       accessKeyId: minioadmin
@@ -30,6 +31,7 @@ spec:
       replicas: 1
       concurrency: 1
       drainTimeout: 2m
+      resultPollTimeout: 30s
       prometheusURL: http://prometheus.default.svc.cluster.local:9090
       prometheusCacheTTL: "0s"
       redis:

@@ -13,6 +13,7 @@ spec:
   dbBackend: postgresql
   fileStorage:
     s3:
+      bucket: llm-d-batch-gateway
       region: us-east-1
       endpoint: https://s3.example.com
   apiServer:
@@ -29,6 +30,7 @@ spec:
       replicas: 1
       concurrency: 8
       drainTimeout: 2m
+      resultPollTimeout: 30s
       inferenceGateway:
         url: http://epp.default.svc:8081
       redis:

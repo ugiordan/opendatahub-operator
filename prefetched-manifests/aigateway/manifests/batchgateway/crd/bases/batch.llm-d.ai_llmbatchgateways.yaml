@@ -115,6 +115,13 @@ spec:
                           to wait for the next request.
                         format: int32
                         type: integer
+                      inputHeaders:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          InputHeaders maps logical header roles to HTTP header names used for tenant
+                          identification and other input metadata (e.g. {"tenant": "X-MaaS-Username"}).
+                        type: object
                       logging:
                         description: Logging configures log verbosity for the API
                           server.
@@ -239,7 +246,7 @@ spec:
               fileStorage:
                 description: |-
                   FileStorage configures the file storage backend used to persist batch
-                  input/output files. If omitted, S3 defaults are used.
+                  input/output files. Exactly one of s3 or fs must be configured.
                 properties:
                   fs:
                     description: FS configures PVC-backed filesystem storage. Mutually
@@ -255,7 +262,12 @@ spec:
                           to mount.
                         maxLength: 253
                         type: string
+                    required:
+                    - claimName
                     type: object
+                    x-kubernetes-validations:
+                    - message: fs.claimName is required
+                      rule: size(self.claimName) > 0
                   retry:
                     description: Retry configures retry behaviour for transient file
                       storage errors.
@@ -275,7 +287,9 @@ spec:
                       maxRetries:
                         default: 3
                         description: MaxRetries is the maximum number of retry attempts.
+                          Set to 0 to disable retries.
                         format: int32
+                        minimum: 0
                         type: integer
                     type: object
                   s3:
@@ -292,6 +306,13 @@ spec:
                         description: AutoCreateBucket causes the operator to create
                           the bucket if it does not exist.
                         type: boolean
+                      bucket:
+                        description: |-
+                          Bucket is the S3 bucket name used for all file storage.
+                          Tenant isolation is achieved via S3 key prefixes, not separate buckets.
+                        maxLength: 63
+                        minLength: 1
+                        type: string
                       endpoint:
                         description: Endpoint overrides the S3 endpoint URL for non-AWS
                           providers (e.g. MinIO).
@@ -311,6 +332,8 @@ spec:
                         description: UsePathStyle forces path-style addressing (required
                           by some S3-compatible stores).
                         type: boolean
+                    required:
+                    - bucket
                     type: object
                 type: object
                 x-kubernetes-validations:
@@ -357,6 +380,74 @@ spec:
                     description: Interval is how often the GC runs (e.g. "30m").
                     pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
                     type: string
+                  replicas:
+                    default: 1
+                    description: |-
+                      Replicas is the desired number of GC pods.
+                      Setting this to 0 suspends the GC; the Ready condition will be False.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  resources:
+                    description: Resources defines CPU and memory requests/limits
+                      for the GC container.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This field depends on the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
                 type: object
               grafana:
                 description: Grafana enables the bundled Grafana dashboard ConfigMap.
@@ -407,6 +498,28 @@ spec:
                     type: array
                     x-kubernetes-list-type: atomic
                 type: object
+              imagePullSecrets:
+                description: |-
+                  ImagePullSecrets is a list of references to secrets for pulling container images
+                  from private registries. Applied globally to all component pods (apiServer, processor, gc).
+                items:
+                  description: |-
+                    LocalObjectReference contains enough information to let you locate the
+                    referenced object inside the same namespace.
+                  properties:
+                    name:
+                      default: ""
+                      description: |-
+                        Name of the referent.
+                        This field is effectively required, but due to backwards compatibility is
+                        allowed to be empty. Instances of this type with an empty value here are
+                        almost certainly wrong.
+                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                      type: string
+                  type: object
+                  x-kubernetes-map-type: atomic
+                maxItems: 20
+                type: array
               monitoring:
                 description: Monitoring enables Prometheus ServiceMonitor and PodMonitor
                   resources.
@@ -478,6 +591,11 @@ spec:
                           InferenceGateway configures the connection to the inference gateway
                           EPP (EndpointPicker) service where inference requests are sent.
                         properties:
+                          inferenceObjective:
+                            description: InferenceObjective specifies the scheduling
+                              objective for this gateway (e.g. "throughput", "latency").
+                            maxLength: 253
+                            type: string
                           inferencePoolName:
                             description: |-
                               InferencePoolName identifies the async dispatch pool for this model.
@@ -724,6 +842,13 @@ spec:
                               More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                             type: object
                         type: object
+                      resultPollTimeout:
+                        description: |-
+                          ResultPollTimeout is the maximum time the batch-gateway processor waits
+                          for an async dispatch result before timing out (e.g. "30s").
+                        maxLength: 32
+                        pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
+                        type: string
                       tls:
                         description: TLS configures TLS for connections to inference
                           gateways.
@@ -804,15 +929,6 @@ spec:
                   config:
                     description: Config holds fine-grained processor configuration.
                     properties:
-                      asyncDispatchResultPollTimeout:
-                        description: |-
-                          AsyncDispatchResultPollTimeout is the maximum time the processor waits for
-                          an async dispatch result before timing out (e.g. "30s").
-                          Only takes effect when dispatchMode is "async".
-                          once the batch-gateway chart supports it.
-                        maxLength: 32
-                        pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
-                        type: string
                       concurrency:
                         description: Concurrency groups all dispatch-rate and concurrency
                           control knobs.
@@ -878,11 +994,6 @@ spec:
                         description: EnablePprof enables the Go pprof profiling HTTP
                           endpoints.
                         type: boolean
-                      inferenceObjective:
-                        description: InferenceObjective specifies the scheduling objective
-                          (e.g. "throughput", "latency").
-                        maxLength: 253
-                        type: string
                       logging:
                         description: Logging configures log verbosity for the processor.
                         properties:
@@ -902,6 +1013,11 @@ spec:
                           state is retained before being considered stale.
                         format: int64
                         type: integer
+                      sendFairnessHeader:
+                        description: |-
+                          SendFairnessHeader controls whether the processor sends a fairness header
+                          to the inference gateway for fair scheduling across tenants.
+                        type: boolean
                     type: object
                   dispatchMode:
                     default: sync
@@ -919,6 +1035,11 @@ spec:
                       unless overridden by a ModelGateways entry.
                       Not supported when dispatchMode is "async"; use modelGateways with inferencePoolName instead.
                     properties:
+                      inferenceObjective:
+                        description: InferenceObjective specifies the scheduling objective
+                          for this gateway (e.g. "throughput", "latency").
+                        maxLength: 253
+                        type: string
                       inferencePoolName:
                         description: |-
                           InferencePoolName identifies the async dispatch pool for this model.
@@ -993,6 +1114,11 @@ spec:
                       description: InferenceGatewaySpec configures a connection to
                         an inference gateway.
                       properties:
+                        inferenceObjective:
+                          description: InferenceObjective specifies the scheduling
+                            objective for this gateway (e.g. "throughput", "latency").
+                          maxLength: 253
+                          type: string
                         inferencePoolName:
                           description: |-
                             InferencePoolName identifies the async dispatch pool for this model.
@@ -1147,6 +1273,18 @@ spec:
                       used to match Prometheus operator rule selectors.
                     type: object
                 type: object
+              redis:
+                description: RedisClient configures Redis/Valkey client connection
+                  settings (TLS, etc.).
+                properties:
+                  enableTLS:
+                    description: EnableTLS enables TLS for the Redis/Valkey connection.
+                    type: boolean
+                  insecure:
+                    description: Insecure skips TLS certificate verification. Only
+                      effective when enableTLS is true.
+                    type: boolean
+                type: object
               secretRef:
                 description: |-
                   SecretRef references the Kubernetes Secret that holds runtime credentials
@@ -1229,6 +1367,7 @@ spec:
                   rule: '!(has(self.secretName) && size(self.secretName) > 0 && has(self.certManager))'
             required:
             - apiServer
+            - fileStorage
             - gc
             - processor
             - secretRef

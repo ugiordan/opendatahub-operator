@@ -8,10 +8,11 @@ metadata:
     build.appstudio.redhat.com/pull_request_number: "{{pull_request_number}}"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-comment: "^/build-konflux"
-    pipelinesascode.tekton.dev/on-label: "[kfbuild-all, kfbuild-rhods-operator]"
-    pipelinesascode.tekton.dev/on-target-branch: "[{{target_branch}}]"
-    pipelinesascode.tekton.dev/on-event: "[pull_request]"
     pipelinesascode.tekton.dev/cancel-in-progress: "true"
+    pipelinesascode.tekton.dev/on-cel-expression: |
+      event == "push"
+      && target_branch == "rhoai-3.5"
+      && "build/schedule/operator-tekton-trigger.txt".pathChanged()
   labels:
     appstudio.openshift.io/application: rhoai-v3-5
     appstudio.openshift.io/component: odh-operator-v3-5
@@ -68,7 +69,7 @@ spec:
     - name: pathInRepo
       value: pipelines/multi-arch-container-build.yaml
   taskRunTemplate:
-    serviceAccountName: build-pipeline-pull-request-pipelines
+    serviceAccountName: build-pipeline-odh-operator-v3-5
   workspaces:
   - name: git-auth
     secret:

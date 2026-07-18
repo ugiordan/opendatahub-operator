@@ -2,7 +2,7 @@ apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   annotations:
-    build.appstudio.openshift.io/repo: https://github.com/red-hat-data-services/rhods-operator?rev={{revision}}
+    build.appstudio.openshift.io/repo: https://gitlab.cee.redhat.com/rhoai/private/rhods-operator?rev={{revision}}
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/cancel-in-progress: "false"
@@ -17,7 +17,7 @@ metadata:
     appstudio.openshift.io/component: odh-operator-v3-5
     pipelines.appstudio.openshift.io/type: build
   name: odh-operator-v3-5-on-schedule
-  namespace: rhoai-tenant
+  namespace: rhoai-private-tenant
 spec:
   timeouts:
     pipeline: 4h
@@ -31,7 +31,7 @@ spec:
     - '{{target_branch}}-{{revision}}'
     - '{{target_branch}}-nightly'
   - name: output-image
-    value: quay.io/rhoai/odh-rhel9-operator:{{target_branch}}
+    value: quay.io/rhoai-private/odh-rhel9-operator:{{target_branch}}
   - name: rhoai-version
     value: "3.5.0"
   - name: build-platforms
@@ -62,6 +62,8 @@ spec:
     value: true
   - name: build-image-index
     value: true
+  - name: disable-slack-notifications
+    value: "true"
   pipelineRef:
     resolver: git
     params:

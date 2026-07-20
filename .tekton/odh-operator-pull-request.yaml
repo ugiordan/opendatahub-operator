@@ -2,22 +2,27 @@ apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   annotations:
-    build.appstudio.openshift.io/repo: https://github.com/red-hat-data-services/rhods-operator?rev={{revision}}
+    build.appstudio.openshift.io/repo: https://gitlab.cee.redhat.com/rhoai/private/rhods-operator?rev={{revision}}
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     build.appstudio.redhat.com/pull_request_number: "{{pull_request_number}}"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-comment: "^/build-konflux"
-    pipelinesascode.tekton.dev/on-label: "[kfbuild-all, kfbuild-rhods-operator]"
-    pipelinesascode.tekton.dev/on-target-branch: "[{{target_branch}}]"
-    pipelinesascode.tekton.dev/on-event: "[pull_request]"
     pipelinesascode.tekton.dev/cancel-in-progress: "true"
+    pipelinesascode.tekton.dev/on-cel-expression: |
+      "non-existent-file.non-existent-ext".pathChanged() && event == "push"
+      && target_branch == "rhoai-3.5"
+      && ( files.all.exists(p, !(
+        p.matches('^bundle/') || p.matches('^build/') || p.matches('^\\.tekton/')
+          || p.matches('^\\.github/workflows/')
+          || p.matches('^Dockerfiles/bundle\\.Dockerfile$')
+      ) || "build/operands-map.yaml".pathChanged() || ".tekton/odh-operator-v3-5-push.yaml".pathChanged()) )
   labels:
-    appstudio.openshift.io/application: automation
-    appstudio.openshift.io/component: pull-request-pipelines-odh-operator
+    appstudio.openshift.io/application: rhoai-v3-5
+    appstudio.openshift.io/component: odh-operator-v3-5
     pipelines.appstudio.openshift.io/type: build
-  name: odh-operator-on-pull-request-84392
-  namespace: rhoai-tenant
+  name: odh-operator-on-pull-request
+  namespace: rhoai-private-tenant
 spec:
   timeouts:
     pipeline: 4h
@@ -34,7 +39,7 @@ spec:
     - version=on-pr-{{revision}}
     - io.openshift.tags=odh-operator
   - name: output-image
-    value: quay.io/rhoai/pull-request-pipelines:odh-operator-{{revision}}
+    value: quay.io/rhoai-private/odh-rhel9-operator:on-pr-{{pull_request_number}}
   - name: build-platforms
     value:
     - linux/x86_64
@@ -54,8 +59,10 @@ spec:
       [{"type": "gomod", "path": "."}, {"type": "rpm", "path": "."}]
   - name: build-image-index
     value: true
-  - name: enable-slack-failure-notification
-    value: "false"
+  - name: rhoai-version
+    value: "3.5.0"
+  - name: disable-slack-notifications
+    value: "true"
   pipelineRef:
     resolver: git
     params:
@@ -66,7 +73,7 @@ spec:
     - name: pathInRepo
       value: pipelines/multi-arch-container-build.yaml
   taskRunTemplate:
-    serviceAccountName: build-pipeline-pull-request-pipelines
+    serviceAccountName: build-pipeline-odh-operator-v3-5
   workspaces:
   - name: git-auth
     secret:

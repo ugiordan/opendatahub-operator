@@ -49,13 +49,13 @@ map:
     src: manifests
     dest: dashboard
     git.url: https://github.com/red-hat-data-services/odh-dashboard
-    git.commit: 18214f59342a49f29f785f1d7bc51fed811309ef
+    git.commit: 7e989331929caf09117a154ae2d0bbf5f3b0fb90
   odh-dashboard-operator:
     src: dashboard-operator/charts/dashboard
     dest: dashboardoperator
     type: chart
     git.url: https://github.com/red-hat-data-services/odh-dashboard
-    git.commit: 18214f59342a49f29f785f1d7bc51fed811309ef
+    git.commit: 7e989331929caf09117a154ae2d0bbf5f3b0fb90
   odh-training-operator:
     src: manifests
     dest: trainingoperator
@@ -95,7 +95,7 @@ map:
     src: config
     dest: ogx
     git.url: https://github.com/red-hat-data-services/ogx-k8s-operator
-    git.commit: 69907fa92dd3477266780da415e81c179d0dce7a
+    git.commit: e05b0e735b2f3521e0c40e2be5e441b7e9327796
   odh-ai-gateway-operator:
     src: config
     dest: aigateway
@@ -136,7 +136,7 @@ additional_meta:
     git.commit: 0d7d459f7e7d61db9a945aadff66dfe7a1cc0920
   odh-core-bff:
     git.url: https://github.com/red-hat-data-services/odh-dashboard
-    git.commit: 18214f59342a49f29f785f1d7bc51fed811309ef
+    git.commit: 7e989331929caf09117a154ae2d0bbf5f3b0fb90
   odh-data-science-pipelines-argo-argoexec:
     git.url: https://github.com/red-hat-data-services/argo-workflows
     git.commit: f19f9ced34dd4548082ada221029e6aae1b653c0
@@ -268,10 +268,10 @@ additional_meta:
     git.commit: 5df2410992110e1ffaf850c50fb0df2776d9349f
   odh-mod-arch-automl:
     git.url: https://github.com/red-hat-data-services/odh-dashboard
-    git.commit: 18214f59342a49f29f785f1d7bc51fed811309ef
+    git.commit: 7e989331929caf09117a154ae2d0bbf5f3b0fb90
   odh-mod-arch-autorag:
     git.url: https://github.com/red-hat-data-services/odh-dashboard
-    git.commit: 18214f59342a49f29f785f1d7bc51fed811309ef
+    git.commit: 7e989331929caf09117a154ae2d0bbf5f3b0fb90
   odh-mod-arch-eval-hub:
     git.url: https://github.com/red-hat-data-services/odh-dashboard
     git.commit: 18214f59342a49f29f785f1d7bc51fed811309ef
@@ -334,7 +334,7 @@ additional_meta:
     git.commit: 59d668e2b0cee33aceea1303275c9e72fa509cab
   odh-trainer-operator:
     git.url: https://github.com/red-hat-data-services/trainer-operator
-    git.commit: fefb03e73a75a398f2b5094f0d2613db6708fa7a
+    git.commit: 3e1def40492185342d0a47b92353f2a2317a53c9
   odh-training-cuda121-torch24-py311:
     git.url: https://github.com/red-hat-data-services/distributed-workloads
     git.commit: 3ec38af969df719be232f4f6ecf4b63a06ef1a25

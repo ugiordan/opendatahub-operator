@@ -16,11 +16,11 @@ relatedImages:
 - name: RELATED_IMAGE_ODH_CLI_IMAGE
   value: quay.io/rhoai/odh-cli-rhel9@sha256:9dae4f0be8c41d508b3c0cb891bfed61c7c425284d75a75b3acdbe014e4246c6
 - name: RELATED_IMAGE_ODH_CORE_BFF_IMAGE
-  value: quay.io/rhoai/odh-core-bff-rhel9@sha256:ae6a1a8208160127250fb916f15a53f7bd58e3df0b6c46d989bbe3f5552814a8
+  value: quay.io/rhoai/odh-core-bff-rhel9@sha256:ddb3e31ae88beb7eac567aac1d427f2c970af91b80e586b46d69a2107afce353
 - name: RELATED_IMAGE_ODH_DASHBOARD_IMAGE
-  value: quay.io/rhoai/odh-dashboard-rhel9@sha256:67b5ed905a0624238ca4970606f29cbf10be086e97e119b1583cf2320151b20c
+  value: quay.io/rhoai/odh-dashboard-rhel9@sha256:899f3fa06cfde0b83479c23beca6733e16168a7ec71376f81faf70d28a7185eb
 - name: RELATED_IMAGE_ODH_DASHBOARD_OPERATOR_IMAGE
-  value: quay.io/rhoai/odh-dashboard-operator-rhel9@sha256:fb0a84cec8431a27948f539b8bfff785fa892e503d9db9894c7cbfe9ebc4a547
+  value: quay.io/rhoai/odh-dashboard-operator-rhel9@sha256:ccb21d58cdbe2d62e2bfb9a2e7b0dea5c53d8eb432b0891e440b86a020037c34
 - name: RELATED_IMAGE_ODH_DATA_SCIENCE_PIPELINES_ARGO_ARGOEXEC_IMAGE
   value: quay.io/rhoai/odh-data-science-pipelines-argo-argoexec-rhel9@sha256:f31aee9c85628f1ad54edfcd4a26ffed58ad4b0aebb34b9b318091956e656417
 - name: RELATED_IMAGE_ODH_DATA_SCIENCE_PIPELINES_ARGO_WORKFLOWCONTROLLER_IMAGE
@@ -150,7 +150,7 @@ relatedImages:
 - name: RELATED_IMAGE_ODH_OGX_CORE_IMAGE
   value: quay.io/rhoai/odh-ogx-core-rhel9@sha256:a5547700a546403ff7cc0089773cc9de577d20aa53c2ec78bb6f49efaeaf20bb
 - name: RELATED_IMAGE_ODH_OGX_K8S_OPERATOR_IMAGE
-  value: quay.io/rhoai/odh-ogx-k8s-operator-rhel9@sha256:7ca52e5e2da997b482645359095d06e779c36169c33af02f46c546d35b3bf9e4
+  value: quay.io/rhoai/odh-ogx-k8s-operator-rhel9@sha256:5b1e288e4fc8d53fd977056e380dbb5e2aadd44a490e03f427657d66b0aa3e73
 - name: RELATED_IMAGE_ODH_OPENVINO_MODEL_SERVER_IMAGE
   value: quay.io/rhoai/odh-openvino-model-server-rhel9@sha256:2f2d5ad6b8367248bbf7731440086a24f5167f2da731b44767c2542d9b79c45f
 - name: RELATED_IMAGE_ODH_PIPELINES_COMPONENTS_IMAGE
@@ -182,7 +182,7 @@ relatedImages:
 - name: RELATED_IMAGE_ODH_TRAINER_IMAGE
   value: quay.io/rhoai/odh-trainer-rhel9@sha256:f9df6c3dd97c5cdb264cd3caf5de0018f1f8c1fc6029bdea7852591750043cfc
 - name: RELATED_IMAGE_ODH_TRAINER_OPERATOR_IMAGE
-  value: quay.io/rhoai/odh-trainer-operator-rhel9@sha256:cfc291c1536414299493929ef402ec85f2a580d873cfbf1c9abbbab291472e6c
+  value: quay.io/rhoai/odh-trainer-operator-rhel9@sha256:599e0001e204af6c776be6d3bcc00e7169aefecab003cde9d5d0fee2f1313a45
 - name: RELATED_IMAGE_ODH_TRAINING_CUDA121_TORCH24_PY311_IMAGE
   value: quay.io/rhoai/odh-training-cuda121-torch24-py311-rhel9@sha256:4a854dccf8e6a273fa9303b23ecd395d77197fc1c3e466f24c99c57249d0fa9a
 - name: RELATED_IMAGE_ODH_TRAINING_CUDA124_TORCH25_PY311_IMAGE

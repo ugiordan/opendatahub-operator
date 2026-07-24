@@ -33,7 +33,7 @@ spec:
     value: '{{revision}}'
   - name: additional-tags
     value:
-    - 'pr-{{pull_request_number}}-into-{{target_branch}}'
+    - 'on-pr-{{pull_request_number}}'
   - name: additional-labels
     value:
     - version=on-pr-{{revision}}
@@ -56,13 +56,24 @@ spec:
     value: true
   - name: prefetch-input
     value: |
-      [{"type": "gomod", "path": "."}, {"type": "rpm", "path": "."}]
+      [
+        {
+          "type": "gomod",
+          "path": "."
+        },
+        {
+          "type": "rpm",
+          "path": "."
+        }
+      ]
   - name: build-image-index
     value: true
   - name: rhoai-version
     value: "3.5.0"
   - name: disable-slack-notifications
     value: "true"
+  - name: build-source-image
+    value: true
   pipelineRef:
     resolver: git
     params:

@@ -12,10 +12,10 @@ metadata:
       event == "push"
       && target_branch == "rhoai-3.5"
       && ( files.all.exists(p, !(
-        p.matches('^bundle/') || p.matches('^build/') || p.matches('^\\.tekton/')
+        p.matches('^bundle/') || p.matches('^\\.tekton/')
           || p.matches('^\\.github/workflows/')
           || p.matches('^Dockerfiles/bundle\\.Dockerfile$')
-      ) || "build/operands-map.yaml".pathChanged() || ".tekton/odh-operator-v3-5-push.yaml".pathChanged()) )
+      ) || ".tekton/odh-operator-v3-5-push.yaml".pathChanged()) )
   labels:
     appstudio.openshift.io/application: rhoai-v3-5
     appstudio.openshift.io/component: odh-operator-v3-5

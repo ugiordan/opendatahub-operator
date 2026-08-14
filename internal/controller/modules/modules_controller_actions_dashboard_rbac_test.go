@@ -240,6 +240,135 @@ func TestDashboardModelRegistryRBACRules_ContainsCreateVerb(t *testing.T) {
 	t.Error("no secrets rule found in model-registry RBAC rules")
 }
 
+// makeStaleRBACObjects returns a Role and RoleBinding in the given namespace
+// that carry the managed label, simulating objects left over from a previous reconcile.
+func makeStaleRBACObjects(namespace, name string) (client.Object, client.Object) {
+	managedLabels := map[string]string{dashboardManagedRBACLabel: dashboardManagedRBACLabelValue}
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    managedLabels,
+		},
+	}
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    managedLabels,
+		},
+	}
+	return role, rb
+}
+
+// TestEnsureDashboardNamespacedRBAC_DisabledCleansUpStale verifies that disabling
+// the dashboard causes pre-existing labeled Roles/RoleBindings to be deleted.
+func TestEnsureDashboardNamespacedRBAC_DisabledCleansUpStale(t *testing.T) {
+	withTestRegistry(t)
+	DefaultRegistry().Add(&dashboardStub{enabled: false})
+
+	staleNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: cluster.DefaultNotebooksNamespaceRHOAI}}
+	staleRole, staleRB := makeStaleRBACObjects(cluster.DefaultNotebooksNamespaceRHOAI, "rhods-dashboard-notebooks")
+
+	rr := newDashboardRBACTestRR(t, cluster.SelfManagedRhoai, staleNS, staleRole, staleRB)
+
+	if err := ensureDashboardNamespacedRBAC(context.Background(), rr); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	remainingRoles := &rbacv1.RoleList{}
+	if err := rr.Client.List(context.Background(), remainingRoles,
+		client.MatchingLabels{dashboardManagedRBACLabel: dashboardManagedRBACLabelValue}); err != nil {
+		t.Fatalf("list roles: %v", err)
+	}
+	if len(remainingRoles.Items) != 0 {
+		t.Errorf("expected 0 stale Roles after dashboard disable, got %d", len(remainingRoles.Items))
+	}
+
+	remainingRBs := &rbacv1.RoleBindingList{}
+	if err := rr.Client.List(context.Background(), remainingRBs,
+		client.MatchingLabels{dashboardManagedRBACLabel: dashboardManagedRBACLabelValue}); err != nil {
+		t.Fatalf("list rolebindings: %v", err)
+	}
+	if len(remainingRBs.Items) != 0 {
+		t.Errorf("expected 0 stale RoleBindings after dashboard disable, got %d", len(remainingRBs.Items))
+	}
+}
+
+// TestEnsureDashboardNamespacedRBAC_NamespaceChangeCleansUpOld verifies that when
+// the notebooks namespace changes, the old namespace's Role/RoleBinding is deleted.
+func TestEnsureDashboardNamespacedRBAC_NamespaceChangeCleansUpOld(t *testing.T) {
+	enableDashboardInRegistry(t)
+
+	oldNS := "rhods-notebooks-old"
+	newNS := cluster.DefaultNotebooksNamespaceRHOAI
+
+	// Pre-seed stale objects from the old namespace
+	staleNSObj := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: oldNS}}
+	newNSObj := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: newNS}}
+	staleRole, staleRB := makeStaleRBACObjects(oldNS, "rhods-dashboard-notebooks")
+
+	// Workbenches CR now points to the new namespace (default, no explicit field)
+	wb := &componentApi.Workbenches{
+		ObjectMeta: metav1.ObjectMeta{Name: componentApi.WorkbenchesInstanceName},
+	}
+
+	rr := newDashboardRBACTestRR(t, cluster.SelfManagedRhoai, staleNSObj, newNSObj, staleRole, staleRB, wb)
+
+	if err := ensureDashboardNamespacedRBAC(context.Background(), rr); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Old namespace objects must be gone
+	oldRoles := &rbacv1.RoleList{}
+	if err := rr.Client.List(context.Background(), oldRoles,
+		client.InNamespace(oldNS),
+		client.MatchingLabels{dashboardManagedRBACLabel: dashboardManagedRBACLabelValue}); err != nil {
+		t.Fatalf("list roles in old namespace: %v", err)
+	}
+	if len(oldRoles.Items) != 0 {
+		t.Errorf("expected 0 Roles in old namespace %s, got %d", oldNS, len(oldRoles.Items))
+	}
+}
+
+// TestEnsureDashboardNamespacedRBAC_ModelRegistryRemovedCleansUp verifies that
+// removing the ModelRegistry CR causes its namespace's Role/RoleBinding to be deleted.
+func TestEnsureDashboardNamespacedRBAC_ModelRegistryRemovedCleansUp(t *testing.T) {
+	enableDashboardInRegistry(t)
+
+	mrNS := "rhoai-model-registries"
+
+	// Pre-seed stale model-registry RBAC (ModelRegistry CR is absent)
+	staleNSObj := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: mrNS}}
+	staleRole, staleRB := makeStaleRBACObjects(mrNS, "rhods-dashboard-model-registries")
+
+	rr := newDashboardRBACTestRR(t, cluster.SelfManagedRhoai, staleNSObj, staleRole, staleRB)
+
+	if err := ensureDashboardNamespacedRBAC(context.Background(), rr); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	remainingRoles := &rbacv1.RoleList{}
+	if err := rr.Client.List(context.Background(), remainingRoles,
+		client.InNamespace(mrNS),
+		client.MatchingLabels{dashboardManagedRBACLabel: dashboardManagedRBACLabelValue}); err != nil {
+		t.Fatalf("list roles: %v", err)
+	}
+	if len(remainingRoles.Items) != 0 {
+		t.Errorf("expected 0 Roles after ModelRegistry removed, got %d", len(remainingRoles.Items))
+	}
+
+	remainingRBs := &rbacv1.RoleBindingList{}
+	if err := rr.Client.List(context.Background(), remainingRBs,
+		client.InNamespace(mrNS),
+		client.MatchingLabels{dashboardManagedRBACLabel: dashboardManagedRBACLabelValue}); err != nil {
+		t.Fatalf("list rolebindings: %v", err)
+	}
+	if len(remainingRBs.Items) != 0 {
+		t.Errorf("expected 0 RoleBindings after ModelRegistry removed, got %d", len(remainingRBs.Items))
+	}
+}
+
 func TestEnsureDashboardNamespacedRBAC_RoleBindingSubject(t *testing.T) {
 	enableDashboardInRegistry(t)
 

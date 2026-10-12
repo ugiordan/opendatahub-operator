@@ -89,7 +89,7 @@ map:
     src: config
     dest: wva
     git.url: https://github.com/red-hat-data-services/workload-variant-autoscaler
-    git.commit: 1bbec1a2f7b9effc3622c2104d1c569293a3221d
+    git.commit: 6f9bac09eb9ca6aef6a39e93c33dfa8c55b6aadf
 additional_meta:
   odh-ai-gateway-payload-processing:
     git.url: https://github.com/red-hat-data-services/ai-gateway-payload-processing
@@ -273,7 +273,7 @@ additional_meta:
     git.commit: 5520e0a613337c09060bebc377f6ae50c391db29
   odh-th06-cuda130-torch210-py312:
     git.url: https://github.com/red-hat-data-services/distributed-workloads
-    git.commit: 49a53ec3b8588fd06a9e2faac6a316add546dfb8
+    git.commit: ce76d55bfc2eb23a08a664045cb9be5121a1065e
   odh-th06-rocm64-torch291-py312:
     git.url: https://github.com/red-hat-data-services/distributed-workloads
     git.commit: 4b39a90794e31f9eb1420f6f255429c978c8ba48
@@ -309,7 +309,7 @@ additional_meta:
     git.commit: c7906e4cec871c67021be4b4ec6b860fae9c7163
   odh-trustyai-service:
     git.url: https://github.com/red-hat-data-services/trustyai-explainability
-    git.commit: cf69b4322fedc0a65f13aa8d784f9b88f0291567
+    git.commit: 4b3ab7e49c387c0819c1ac50b381676a3f432427
   odh-trustyai-vllm-orchestrator-gateway:
     git.url: https://github.com/red-hat-data-services/vllm-orchestrator-gateway
     git.commit: 79ade24e7976f4691429bf19e6b507d656c635fb

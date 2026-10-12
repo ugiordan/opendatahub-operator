@@ -90,7 +90,7 @@ relatedImages:
 - name: RELATED_IMAGE_ODH_MODEL_PERFORMANCE_DATA_IMAGE
   value: "quay.io/rhoai/odh-model-performance-data-rhel9@sha256:3b0e7a91d95fdc3d89c7e0978702a679c34fa66b2133990c06f55f9ec99a30eb"
 - name: RELATED_IMAGE_ODH_MODEL_REGISTRY_IMAGE
-  value: "quay.io/rhoai/odh-model-registry-rhel9@sha256:6f1284f2af4468cc013d63f3e6ba021b718ba569010d0336c0b7177fa44a93f7"
+  value: "quay.io/rhoai/odh-model-registry-rhel9@sha256:35bd1c54acfc586c0afdd358c98208f34d28ff50e987e775a09e6d641a701b2e"
 - name: RELATED_IMAGE_ODH_MODEL_REGISTRY_JOB_ASYNC_UPLOAD_IMAGE
   value: "quay.io/rhoai/odh-model-registry-job-async-upload-rhel9@sha256:bf126920225c91cb3288e9fac783bffeeb62c71ba79833b9ccd4d39e351fd0ca"
 - name: RELATED_IMAGE_ODH_MODEL_REGISTRY_OPERATOR_IMAGE

@@ -1,7 +1,7 @@
 map:
   notebooks:
     git.url: https://github.com/red-hat-data-services/notebooks
-    git.commit: 755e0347d2583aa9e03d2953f345ad7b6e6bba91
+    git.commit: c1f520d726d3d10aa0c8fb25050b30c6b24ae00a
     src: manifests
     dest: workbenches/notebooks
     ref_type: branch
@@ -240,7 +240,7 @@ additional_meta:
     git.commit: 755e0347d2583aa9e03d2953f345ad7b6e6bba91
   odh-pipeline-runtime-minimal-cpu-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
-    git.commit: 755e0347d2583aa9e03d2953f345ad7b6e6bba91
+    git.commit: c1f520d726d3d10aa0c8fb25050b30c6b24ae00a
   odh-pipeline-runtime-pytorch-cuda-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
     git.commit: 755e0347d2583aa9e03d2953f345ad7b6e6bba91
@@ -252,10 +252,10 @@ additional_meta:
     git.commit: 755e0347d2583aa9e03d2953f345ad7b6e6bba91
   odh-pipeline-runtime-tensorflow-cuda-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
-    git.commit: 755e0347d2583aa9e03d2953f345ad7b6e6bba91
+    git.commit: c1f520d726d3d10aa0c8fb25050b30c6b24ae00a
   odh-pipeline-runtime-tensorflow-rocm-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
-    git.commit: 755e0347d2583aa9e03d2953f345ad7b6e6bba91
+    git.commit: c1f520d726d3d10aa0c8fb25050b30c6b24ae00a
   odh-rhaii-cluster-validator:
     git.url: https://github.com/red-hat-data-services/rhaii-cluster-validation
     git.commit: 1cdc47e2483fa72798d78614910f3434fccf0857

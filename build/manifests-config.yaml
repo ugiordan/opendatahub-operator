@@ -9,7 +9,7 @@ map:
     src: config
     dest: kserve
     git.url: https://github.com/red-hat-data-services/kserve
-    git.commit: 58a73d8b4d4697aad83ed5e68dac17321063dbb8
+    git.commit: 7bbbe4b542beb08b485043b84772affe65689e92
   odh-kf-notebook-controller:
     src: components/notebook-controller/config
     dest: workbenches/kf-notebook-controller
@@ -29,7 +29,7 @@ map:
     src: ray-operator/config
     dest: ray
     git.url: https://github.com/red-hat-data-services/kuberay
-    git.commit: 086d0ca24756aae8fa9226d4b45b6f1fc0cd5175
+    git.commit: 6c82ced508edf1ed2ca98483c7bca4d74793d24c
   odh-trustyai-service-operator:
     src: config
     dest: trustyai
@@ -126,7 +126,7 @@ additional_meta:
     git.commit: d0a7c7bdd4626d78c7d57db3b7d82c28ee4e4755
   odh-kserve-agent:
     git.url: https://github.com/red-hat-data-services/kserve
-    git.commit: 58a73d8b4d4697aad83ed5e68dac17321063dbb8
+    git.commit: 7bbbe4b542beb08b485043b84772affe65689e92
   odh-kserve-autogluon-server:
     git.url: https://github.com/red-hat-data-services/kserve-autogluon-server
     git.commit: d2b19dea72c22b9df96611385210870a0b16c0e5

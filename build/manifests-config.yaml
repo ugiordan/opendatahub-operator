@@ -54,7 +54,7 @@ map:
     src: manifests
     dest: trainingoperator
     git.url: https://github.com/red-hat-data-services/training-operator
-    git.commit: 0135fffd10f31aa5c5255568340e940971442f91
+    git.commit: b7630eb30cc60454c15b7f6d2ded3a85258677dd
   odh-feast-operator:
     src: infra/feast-operator/config
     dest: feastoperator
@@ -324,7 +324,7 @@ additional_meta:
     git.commit: c1f520d726d3d10aa0c8fb25050b30c6b24ae00a
   odh-workbench-jupyter-minimal-cpu-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
-    git.commit: c1f520d726d3d10aa0c8fb25050b30c6b24ae00a
+    git.commit: 271a2d7cf3d5acea6da66cd4ed6eb8f565054063
   odh-workbench-jupyter-minimal-cuda-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
     git.commit: 271a2d7cf3d5acea6da66cd4ed6eb8f565054063

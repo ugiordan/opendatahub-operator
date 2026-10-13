@@ -76,13 +76,13 @@ relatedImages:
 - name: RELATED_IMAGE_ODH_ML_PIPELINES_API_SERVER_V2_IMAGE
   value: "quay.io/rhoai/odh-ml-pipelines-api-server-v2-rhel9@sha256:70cc5f1f70dbc03cd2f1417afb6cd9fbc07569caf236280b358b87c88f1dade5"
 - name: RELATED_IMAGE_ODH_ML_PIPELINES_DRIVER_IMAGE
-  value: "quay.io/rhoai/odh-ml-pipelines-driver-rhel9@sha256:cd8f8342314c6ddf51fd200c539902e1875c2b9b11b8900253bab5588497f948"
+  value: "quay.io/rhoai/odh-ml-pipelines-driver-rhel9@sha256:52d81b97b1bc233ab5b7dc1e0101d897c4dcf161674de4ed3bce86b7a9580059"
 - name: RELATED_IMAGE_ODH_ML_PIPELINES_LAUNCHER_IMAGE
-  value: "quay.io/rhoai/odh-ml-pipelines-launcher-rhel9@sha256:09cdf86d087fa7024a431041de5b03d7758d8d83aedd070299743ce347080180"
+  value: "quay.io/rhoai/odh-ml-pipelines-launcher-rhel9@sha256:5532ad3fca994149200738aad470da280aa64fb428e53c88d18666ce4c9375be"
 - name: RELATED_IMAGE_ODH_ML_PIPELINES_PERSISTENCEAGENT_V2_IMAGE
-  value: "quay.io/rhoai/odh-ml-pipelines-persistenceagent-v2-rhel9@sha256:7ff57e02c08166982b1c758d9b496b479115be3330ee5e5e9b4c5fa112a0aaea"
+  value: "quay.io/rhoai/odh-ml-pipelines-persistenceagent-v2-rhel9@sha256:52b38be539aa88e904b54783b36ba3f6785ea6d105a883f798b1f21f9622c512"
 - name: RELATED_IMAGE_ODH_ML_PIPELINES_SCHEDULEDWORKFLOW_V2_IMAGE
-  value: "quay.io/rhoai/odh-ml-pipelines-scheduledworkflow-v2-rhel9@sha256:2be09c74c33c6db75c133de28ea24df04ec03dbc6d9c90d19465d938b382b3e9"
+  value: "quay.io/rhoai/odh-ml-pipelines-scheduledworkflow-v2-rhel9@sha256:f04de91dc2988b955ad4d4952ba5f1fc451fa6e1ea7c01c3e0af2e0a96e33c6c"
 - name: RELATED_IMAGE_ODH_MODEL_CONTROLLER_IMAGE
   value: "quay.io/rhoai/odh-model-controller-rhel9@sha256:c95c793b28d79ecce62e65451695521f1e34ec2caae9276c785250e526826553"
 - name: RELATED_IMAGE_ODH_MODEL_METADATA_COLLECTION_IMAGE

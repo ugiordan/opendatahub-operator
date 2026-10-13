@@ -24,7 +24,7 @@ map:
     src: config
     dest: datasciencepipelines
     git.url: https://github.com/red-hat-data-services/data-science-pipelines-operator
-    git.commit: b6d19f563951545456e93fd9d83fdc158085f0f5
+    git.commit: 01f4523ca89e24e4a82043fa6f7c89b18c5c8eab
   odh-kuberay-operator-controller:
     src: ray-operator/config
     dest: ray
@@ -234,7 +234,7 @@ additional_meta:
     git.commit: eb8fb12594ee4a262ea23e0bc8cd8b9935afd2a7
   odh-pipelines-components:
     git.url: https://github.com/red-hat-data-services/pipelines-components
-    git.commit: 5570675c69e9668581aad12ab09ba89314627421
+    git.commit: 840535ef56fe4f9abf70098788fc7b5ef1502433
   odh-pipeline-runtime-datascience-cpu-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
     git.commit: c1f520d726d3d10aa0c8fb25050b30c6b24ae00a

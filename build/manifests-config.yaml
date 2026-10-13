@@ -14,12 +14,12 @@ map:
     src: components/notebook-controller/config
     dest: workbenches/kf-notebook-controller
     git.url: https://github.com/red-hat-data-services/kubeflow
-    git.commit: 55245e7932f24bb51d4d8db4438cb5e90f7dc30d
+    git.commit: 880b9cca18b46a374c22df42e052ecb77e267d24
   odh-notebook-controller:
     src: components/odh-notebook-controller/config
     dest: workbenches/odh-notebook-controller
     git.url: https://github.com/red-hat-data-services/kubeflow
-    git.commit: 55245e7932f24bb51d4d8db4438cb5e90f7dc30d
+    git.commit: 880b9cca18b46a374c22df42e052ecb77e267d24
   odh-data-science-pipelines-operator-controller:
     src: config
     dest: datasciencepipelines
@@ -29,7 +29,7 @@ map:
     src: ray-operator/config
     dest: ray
     git.url: https://github.com/red-hat-data-services/kuberay
-    git.commit: b4e2cb59be81866a4231b30987d53070f237bffe
+    git.commit: 086d0ca24756aae8fa9226d4b45b6f1fc0cd5175
   odh-trustyai-service-operator:
     src: config
     dest: trustyai
@@ -117,7 +117,7 @@ additional_meta:
     git.commit: a2cdd3f29afa70f56cbb94efc484b15f32b20cc4
   odh-feature-server:
     git.url: https://github.com/red-hat-data-services/feast
-    git.commit: 032da9064b1c74ef8d9fb3474bb23c06747a2f6c
+    git.commit: fa3fb75e3b396ea0c4552a2a125fe6da1b953804
   odh-fms-guardrails-orchestrator:
     git.url: https://github.com/red-hat-data-services/fms-guardrails-orchestrator
     git.commit: aef9fbe951c245e1636a0d9a1ca5ceaabb9203cd

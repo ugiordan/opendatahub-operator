@@ -93,7 +93,7 @@ map:
 additional_meta:
   odh-ai-gateway-payload-processing:
     git.url: https://github.com/red-hat-data-services/ai-gateway-payload-processing
-    git.commit: 211aa4a4d4bd96dcc2b0736d85f4a0ff873b1ae4
+    git.commit: 6b80de755049dea941422b5f2bb5b8951dc886ae
   odh-automl:
     git.url: https://github.com/red-hat-data-services/pipelines-components
     git.commit: 5570675c69e9668581aad12ab09ba89314627421
@@ -135,7 +135,7 @@ additional_meta:
     git.commit: 58a73d8b4d4697aad83ed5e68dac17321063dbb8
   odh-kserve-router:
     git.url: https://github.com/red-hat-data-services/kserve
-    git.commit: 58a73d8b4d4697aad83ed5e68dac17321063dbb8
+    git.commit: 7bbbe4b542beb08b485043b84772affe65689e92
   odh-kserve-storage-initializer:
     git.url: https://github.com/red-hat-data-services/kserve
     git.commit: c222ed59c78e982ca878644fa0ad4b9c475378fe

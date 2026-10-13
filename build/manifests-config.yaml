@@ -201,7 +201,7 @@ additional_meta:
     git.commit: 279080d15aa7e1cb02978b89742af00e8ef89c01
   odh-model-registry-job-async-upload:
     git.url: https://github.com/red-hat-data-services/model-registry
-    git.commit: 2e6ce265c13f9ab9660ba2f00843a5c49f506df3
+    git.commit: 279080d15aa7e1cb02978b89742af00e8ef89c01
   odh-model-serving-api:
     git.url: https://github.com/red-hat-data-services/odh-model-controller
     git.commit: e1fde698a20ad8c3f6ccd44cd39c2485c6f1bde1
@@ -321,7 +321,7 @@ additional_meta:
     git.commit: 755e0347d2583aa9e03d2953f345ad7b6e6bba91
   odh-workbench-jupyter-datascience-cpu-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
-    git.commit: c1f520d726d3d10aa0c8fb25050b30c6b24ae00a
+    git.commit: 271a2d7cf3d5acea6da66cd4ed6eb8f565054063
   odh-workbench-jupyter-minimal-cpu-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
     git.commit: 271a2d7cf3d5acea6da66cd4ed6eb8f565054063

@@ -1,7 +1,7 @@
 map:
   notebooks:
     git.url: https://github.com/red-hat-data-services/notebooks
-    git.commit: 22d220209bb95b50a3aa01bb218487075b5954dc
+    git.commit: b2620304bdec00f35586933d22980471991b11d9
     src: manifests
     dest: workbenches/notebooks
     ref_type: branch
@@ -198,7 +198,7 @@ additional_meta:
     git.commit: 5f977c98057b2a567283a515a69db2bab5016695
   odh-model-registry:
     git.url: https://github.com/red-hat-data-services/model-registry
-    git.commit: e7e3f4b9e6c38e845a9ba62876853899e203a21a
+    git.commit: bb37937f03e5fbcd72dc7941cd4f789f26ae67c9
   odh-model-registry-job-async-upload:
     git.url: https://github.com/red-hat-data-services/model-registry
     git.commit: e7e3f4b9e6c38e845a9ba62876853899e203a21a
@@ -237,22 +237,22 @@ additional_meta:
     git.commit: 840535ef56fe4f9abf70098788fc7b5ef1502433
   odh-pipeline-runtime-datascience-cpu-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
-    git.commit: c1f520d726d3d10aa0c8fb25050b30c6b24ae00a
+    git.commit: b2620304bdec00f35586933d22980471991b11d9
   odh-pipeline-runtime-minimal-cpu-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
     git.commit: 724299f7545b69ffcaaeffd754168a737da85217
   odh-pipeline-runtime-pytorch-cuda-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
-    git.commit: 724299f7545b69ffcaaeffd754168a737da85217
+    git.commit: b2620304bdec00f35586933d22980471991b11d9
   odh-pipeline-runtime-pytorch-llmcompressor-cuda-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
     git.commit: c1f520d726d3d10aa0c8fb25050b30c6b24ae00a
   odh-pipeline-runtime-pytorch-rocm-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
-    git.commit: 22d220209bb95b50a3aa01bb218487075b5954dc
+    git.commit: b2620304bdec00f35586933d22980471991b11d9
   odh-pipeline-runtime-tensorflow-cuda-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
-    git.commit: 724299f7545b69ffcaaeffd754168a737da85217
+    git.commit: b2620304bdec00f35586933d22980471991b11d9
   odh-pipeline-runtime-tensorflow-rocm-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
     git.commit: 22d220209bb95b50a3aa01bb218487075b5954dc
@@ -300,7 +300,7 @@ additional_meta:
     git.commit: 858f887bf7cf40b9b591ef71c19770b35282602b
   odh-training-rocm64-torch29-py312:
     git.url: https://github.com/red-hat-data-services/distributed-workloads
-    git.commit: 5a27fd41a75ad920075097f61813274272c165a6
+    git.commit: 858f887bf7cf40b9b591ef71c19770b35282602b
   odh-trustyai-garak-lls-provider-dsp:
     git.url: https://github.com/red-hat-data-services/llama-stack-provider-trustyai-garak
     git.commit: 9d734465f91b7120a87cefcd145f0ffa91fefc9c
@@ -333,19 +333,19 @@ additional_meta:
     git.commit: 22d220209bb95b50a3aa01bb218487075b5954dc
   odh-workbench-jupyter-pytorch-cuda-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
-    git.commit: 724299f7545b69ffcaaeffd754168a737da85217
+    git.commit: b2620304bdec00f35586933d22980471991b11d9
   odh-workbench-jupyter-pytorch-llmcompressor-cuda-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
     git.commit: 724299f7545b69ffcaaeffd754168a737da85217
   odh-workbench-jupyter-pytorch-rocm-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
-    git.commit: 22d220209bb95b50a3aa01bb218487075b5954dc
+    git.commit: b2620304bdec00f35586933d22980471991b11d9
   odh-workbench-jupyter-tensorflow-cuda-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
-    git.commit: 724299f7545b69ffcaaeffd754168a737da85217
+    git.commit: b2620304bdec00f35586933d22980471991b11d9
   odh-workbench-jupyter-tensorflow-rocm-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
     git.commit: 22d220209bb95b50a3aa01bb218487075b5954dc
   odh-workbench-jupyter-trustyai-cpu-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
-    git.commit: 724299f7545b69ffcaaeffd754168a737da85217
+    git.commit: b2620304bdec00f35586933d22980471991b11d9

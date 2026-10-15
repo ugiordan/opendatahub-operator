@@ -147,13 +147,13 @@ additional_meta:
     git.commit: 63c5486b42bb70c241c017f4833bf6d738acee05
   odh-llm-d-batch-gateway-apiserver:
     git.url: https://github.com/red-hat-data-services/batch-gateway
-    git.commit: 702ad01fbe3565b05afc2e94a2695286dcf34e54
+    git.commit: 5dfac4b3da26b366eacd4516b7bbd234dd41743e
   odh-llm-d-batch-gateway-gc:
     git.url: https://github.com/red-hat-data-services/batch-gateway
-    git.commit: 702ad01fbe3565b05afc2e94a2695286dcf34e54
+    git.commit: 5dfac4b3da26b366eacd4516b7bbd234dd41743e
   odh-llm-d-batch-gateway-processor:
     git.url: https://github.com/red-hat-data-services/batch-gateway
-    git.commit: 702ad01fbe3565b05afc2e94a2695286dcf34e54
+    git.commit: 5dfac4b3da26b366eacd4516b7bbd234dd41743e
   odh-llm-d-inference-scheduler:
     git.url: https://github.com/red-hat-data-services/llm-d-inference-scheduler
     git.commit: 5e8655d59f7d08a0172b4b9c6817e2569f8c5309
@@ -315,7 +315,7 @@ additional_meta:
     git.commit: 79ade24e7976f4691429bf19e6b507d656c635fb
   odh-vllm-cpu:
     git.url: https://github.com/red-hat-data-services/vllm-cpu
-    git.commit: 4532041dd95fa877984995adc2bc2149b668768e
+    git.commit: 4b46cbbfec538fdf99bd3761267e310a08b08aed
   odh-workbench-codeserver-datascience-cpu-py312:
     git.url: https://github.com/red-hat-data-services/notebooks
     git.commit: 755e0347d2583aa9e03d2953f345ad7b6e6bba91

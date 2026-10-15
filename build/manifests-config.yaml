@@ -1,7 +1,7 @@
 map:
   notebooks:
     git.url: https://github.com/red-hat-data-services/notebooks
-    git.commit: 29e3df3f825515629bd7a0cfc66fd52d77745db8
+    git.commit: 3507be6391fe7ce627e78b61c574971ed75ec97d
     src: manifests
     dest: workbenches/notebooks
     ref_type: branch
@@ -306,7 +306,7 @@ additional_meta:
     git.commit: 9d734465f91b7120a87cefcd145f0ffa91fefc9c
   odh-trustyai-nemo-guardrails-server:
     git.url: https://github.com/red-hat-data-services/NeMo-Guardrails
-    git.commit: 1a66351380f5117aa153a42b27e095c03989bb4f
+    git.commit: 31ec0ab1a37e8fcc4d280c3a81bdec255ed2701d
   odh-trustyai-service:
     git.url: https://github.com/red-hat-data-services/trustyai-explainability
     git.commit: 4b3ab7e49c387c0819c1ac50b381676a3f432427

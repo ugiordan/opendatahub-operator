@@ -120,7 +120,7 @@ additional_meta:
     git.commit: 25545330e688be6083d7068c62cd0ac4c70f0c7e
   odh-fms-guardrails-orchestrator:
     git.url: https://github.com/red-hat-data-services/fms-guardrails-orchestrator
-    git.commit: 4d1bbf50871f29002436f4d595d89b0e24faf4ad
+    git.commit: ff288843611ec2ed3dffd0a08dc1847dfd37cb93
   odh-guardrails-detector-huggingface-runtime:
     git.url: https://github.com/red-hat-data-services/guardrails-detectors
     git.commit: d0a7c7bdd4626d78c7d57db3b7d82c28ee4e4755
@@ -177,19 +177,19 @@ additional_meta:
     git.commit: 6b8bb768429890af036cd079c56988fdeb897939
   odh-ml-pipelines-api-server-v2:
     git.url: https://github.com/red-hat-data-services/data-science-pipelines
-    git.commit: c1061ac2ef97ce3a11c5ba612ce8293a1a883656
+    git.commit: 2c2eab3da356daeb94aa13ab1638875b6c1f2f49
   odh-ml-pipelines-driver:
     git.url: https://github.com/red-hat-data-services/data-science-pipelines
-    git.commit: c1061ac2ef97ce3a11c5ba612ce8293a1a883656
+    git.commit: 2c2eab3da356daeb94aa13ab1638875b6c1f2f49
   odh-ml-pipelines-launcher:
     git.url: https://github.com/red-hat-data-services/data-science-pipelines
-    git.commit: c1061ac2ef97ce3a11c5ba612ce8293a1a883656
+    git.commit: 2c2eab3da356daeb94aa13ab1638875b6c1f2f49
   odh-ml-pipelines-persistenceagent-v2:
     git.url: https://github.com/red-hat-data-services/data-science-pipelines
-    git.commit: c1061ac2ef97ce3a11c5ba612ce8293a1a883656
+    git.commit: 2c2eab3da356daeb94aa13ab1638875b6c1f2f49
   odh-ml-pipelines-scheduledworkflow-v2:
     git.url: https://github.com/red-hat-data-services/data-science-pipelines
-    git.commit: c1061ac2ef97ce3a11c5ba612ce8293a1a883656
+    git.commit: 2c2eab3da356daeb94aa13ab1638875b6c1f2f49
   odh-model-metadata-collection:
     git.url: https://github.com/red-hat-data-services/model-metadata-collection
     git.commit: 4a0788079956fe621a0f597916ebb8ee16d0cb84
@@ -198,7 +198,7 @@ additional_meta:
     git.commit: 5f977c98057b2a567283a515a69db2bab5016695
   odh-model-registry:
     git.url: https://github.com/red-hat-data-services/model-registry
-    git.commit: 8e4f648f135c8f816dd83142b3adb9dc6e3129c9
+    git.commit: bf0b6e45b486849c627dd26d8af5f8d884057b73
   odh-model-registry-job-async-upload:
     git.url: https://github.com/red-hat-data-services/model-registry
     git.commit: bb37937f03e5fbcd72dc7941cd4f789f26ae67c9

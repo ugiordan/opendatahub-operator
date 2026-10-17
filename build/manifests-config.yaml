@@ -150,7 +150,7 @@ additional_meta:
     git.commit: 88fc425ebf37cf80e49245a6b751c21d51f97681
   odh-llm-d-batch-gateway-gc:
     git.url: https://github.com/red-hat-data-services/batch-gateway
-    git.commit: 88fc425ebf37cf80e49245a6b751c21d51f97681
+    git.commit: 526fe58db2d747ab2a510c645f0a81e5052a2a99
   odh-llm-d-batch-gateway-processor:
     git.url: https://github.com/red-hat-data-services/batch-gateway
     git.commit: 88fc425ebf37cf80e49245a6b751c21d51f97681

@@ -136,7 +136,7 @@ relatedImages:
 - name: RELATED_IMAGE_ODH_RHAII_CLUSTER_VALIDATOR_IMAGE
   value: quay.io/rhoai/odh-rhaii-cluster-validator-rhel9@sha256:6a9ad28b7a39b014646e9960d202ae7b7664e767367b2c3fc048d61e1512ea50
 - name: RELATED_IMAGE_ODH_RHAII_VALIDATOR_TOOLS_IMAGE
-  value: quay.io/rhoai/odh-rhaii-validator-tools-rhel9@sha256:74d3a5035e241715e9c34468ff0bb685c7ec3dde50be92017837ce32ce979fc5
+  value: quay.io/rhoai/odh-rhaii-validator-tools-rhel9@sha256:cf9e22180b1b4230d7b5fe68ee16ff446bbf1bb122684286496bae3910ad7b8b
 - name: RELATED_IMAGE_ODH_SPARK_OPERATOR_IMAGE
   value: quay.io/rhoai/odh-spark-operator-rhel9@sha256:ffeacb5e0a3114979c08e4c88cf6fa65d0cdf93033623308174fb1e19641ef7e
 - name: RELATED_IMAGE_ODH_TA_LMES_DRIVER_IMAGE

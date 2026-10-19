@@ -141,7 +141,7 @@ additional_meta:
     git.commit: 7bbbe4b542beb08b485043b84772affe65689e92
   odh-kube-auth-proxy:
     git.url: https://github.com/red-hat-data-services/kube-auth-proxy
-    git.commit: f2fbdb32f8a9718145e576bf0a8e96eb86de37f0
+    git.commit: 476497bb9ccf4d77d69587eb66b4857e979fa676
   odh-llama-stack-core:
     git.url: https://github.com/red-hat-data-services/ogx-distribution
     git.commit: 63c5486b42bb70c241c017f4833bf6d738acee05

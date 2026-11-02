@@ -29,12 +29,12 @@ package e2e_test
 //   - unknown and removed ingress names: no fallback, recovery (Tier2)
 //   - known-but-unready Gateway blocks admission until usable; controller restart
 //     converges without recreation (Tier2)
-//   - projected contract ConfigMap lifecycle: out-of-band deletion is healed,
+//   - projected ingress ConfigMap lifecycle: out-of-band deletion is healed,
 //     stale entries dropped on ingress removal (Tier2, 94382 amendment)
-//   - malformed/missing projected contract data: DEFERRED to RHOAIENG-102011
-//     (contract v1) - red against the shipped build by design because the
-//     contract heals before the failure is observable; opt in via
-//     E2E_TEST_RUN_DEFERRED_CONTRACT_V1=true (Tier2)
+//   - malformed/missing/tampered projected ingress data: DEFERRED to
+//     RHOAIENG-102011 (checksum verification, 3.7) - red against the shipped
+//     build by design because the data heals before the failure is
+//     observable; opt in via E2E_TEST_RUN_DEFERRED_INGRESS_CHECKSUM=true (Tier2)
 //   - notebook controller RBAC isolation: no GatewayConfig/Workbenches access (Tier1)
 //   - Gateway attachment permissions: allowedRoutes admits only the gateway and
 //     applications namespaces; foreign namespaces are not admitted (Tier2)
@@ -49,6 +49,7 @@ package e2e_test
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -885,8 +886,19 @@ func projectedIngressNames(entries []projectedIngress) []string {
 	return names
 }
 
-// setNotebookControllerConfigIngresses overwrites the projected contract data.
+// setNotebookControllerConfigIngresses overwrites the projected ingress data.
 func (tc *WorkbenchesTestCtx) setNotebookControllerConfigIngresses(ctx context.Context, data string) error {
+	// Preserve the writer's hash when present so a payload-only overwrite is
+	// a hash mismatch by construction; failure injections that need a
+	// self-consistent projection use setNotebookControllerConfigIngressData.
+	return tc.setNotebookControllerConfigIngressData(ctx, data, "")
+}
+
+// setNotebookControllerConfigIngressData overwrites the projected ingress
+// payload and its hash: a non-empty hash is written verbatim (mismatch
+// injection), an empty hash recomputes it over the payload (self-consistent
+// projection, the legitimate-writer simulation).
+func (tc *WorkbenchesTestCtx) setNotebookControllerConfigIngressData(ctx context.Context, data, hash string) error {
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		cm := &corev1.ConfigMap{}
 		if err := tc.Client().Get(ctx,
@@ -897,6 +909,11 @@ func (tc *WorkbenchesTestCtx) setNotebookControllerConfigIngresses(ctx context.C
 			cm.Data = map[string]string{}
 		}
 		cm.Data["ingresses"] = data
+		if hash == "" {
+			sum := sha256.Sum256([]byte(data))
+			hash = hex.EncodeToString(sum[:])
+		}
+		cm.Data["ingressesHash"] = hash
 		return tc.Client().Update(ctx, cm)
 	})
 }
@@ -1079,30 +1096,32 @@ func (tc *WorkbenchesTestCtx) ValidateNotebookIngressContractConfigMapLifecycle(
 	requireProjection(gateway.GetDefaultGatewayName(), alpha.Name, beta.Name)
 }
 
-// ValidateNotebookIngressContractDataFailures pins the contract-data failure
-// cases. DEFERRED to RHOAIENG-102011 (contract v1): against the shipped 3.6
-// build this spec is red by design - the in-cluster workbenches-operator
-// reverts a corrupted odh-notebook-controller-config in ~26ms and the platform
-// operator re-renders a corrupted Workbenches CR in ~2.5s, healing the
-// contract before the notebook controller can observe the failure, and the
-// IngressResolved status the original AC names does not exist yet. The spec is
-// the implementation target for 102011's fail-closed contract decoding: run it
-// with E2E_TEST_RUN_DEFERRED_CONTRACT_V1=true once that implementation lands.
-// When enabled it asserts: corrupting the projected contract (malformed JSON,
-// or a valid projection missing the assigned shard's entry) must surface as
-// IngressNotFound with the route removed, must never fall back to the default
-// Gateway, must not recreate the workbench, and must reconverge once the
-// contract data is valid again.
+// ValidateNotebookIngressContractDataFailures pins the ingress-data failure
+// cases. DEFERRED to RHOAIENG-102011 (checksum verification, targeted 3.7):
+// against the shipped 3.6 build this spec is red by design - the in-cluster
+// workbenches-operator reverts a corrupted odh-notebook-controller-config in
+// ~26ms and the platform operator re-renders a corrupted Workbenches CR in
+// ~2.5s, healing the data before the notebook controller can observe the
+// failure. The spec is the implementation target for 102011's fail-closed
+// consumer verification (kubeflow#929): run it with
+// E2E_TEST_RUN_DEFERRED_INGRESS_CHECKSUM=true once that implementation lands.
+// When enabled it asserts: corrupting the projected data (malformed JSON, a
+// valid projection missing the assigned shard's entry, or a payload that does
+// not match the renderer's ingressesHash) must surface as IngressNotFound
+// with the route removed, must never fall back to the default Gateway, must
+// not recreate the workbench, and must reconverge once the data is valid
+// again.
 func (tc *WorkbenchesTestCtx) ValidateNotebookIngressContractDataFailures(t *testing.T) {
 	t.Helper()
 	skipUnless(t, Tier2)
-	// Deferred to RHOAIENG-102011 (contract v1): the shipped build heals
-	// malformed/missing contract data before the notebook controller can
-	// observe it (see the doc comment), so the AC's failure semantics are not
-	// realizable yet. Opting in runs the red implementation target.
-	if os.Getenv("E2E_TEST_RUN_DEFERRED_CONTRACT_V1") != "true" {
-		t.Skipf("deferred to RHOAIENG-102011 (contract v1): the shipped build heals corrupted contract data " +
-			"before it is observable; set E2E_TEST_RUN_DEFERRED_CONTRACT_V1=true to run this red implementation target")
+	// Deferred to RHOAIENG-102011 (checksum verification, targeted 3.7): the
+	// shipped build heals malformed/missing/tampered data before the notebook
+	// controller can observe it (see the doc comment), so the AC's failure
+	// semantics are not realizable yet. Opting in runs the red implementation
+	// target.
+	if os.Getenv("E2E_TEST_RUN_DEFERRED_INGRESS_CHECKSUM") != "true" {
+		t.Skipf("deferred to RHOAIENG-102011 (checksum verification, 3.7): the shipped build heals corrupted ingress data " +
+			"before it is observable; set E2E_TEST_RUN_DEFERRED_INGRESS_CHECKSUM=true to run this red implementation target")
 	}
 	tc.skipNotebookIngressAssignment(t)
 	t.Log("Validating notebook ingress contract data failures")
@@ -1144,29 +1163,36 @@ func (tc *WorkbenchesTestCtx) ValidateNotebookIngressContractDataFailures(t *tes
 		return len(routes.Items), nil
 	}
 
-	injectFailure := func(name, data string) {
+	// injectFailure corrupts the projected data: an empty hash writes a
+	// self-consistent projection over the payload (legitimate-writer
+	// simulation for the missing and malformed cases), a non-empty hash is
+	// written verbatim (tamper case).
+	injectFailure := func(name, data, hash string) {
 		t.Helper()
 		since := time.Now()
-		require.NoError(t, tc.setNotebookControllerConfigIngresses(ctx, data),
-			"inject %s contract data", name)
+		require.NoError(t, tc.setNotebookControllerConfigIngressData(ctx, data, hash),
+			"inject %s ingress data", name)
 		// The controller must notice: a fresh IngressNotFound event fires and
 		// the route is removed.
 		tc.requireIngressNotFoundEventSince(ctx, t, notebook, since)
 		g.Eventually(routeCount, tc.TestTimeouts.authGatewayTimeout, 2*time.Second).Should(BeZero(),
-			"the Notebook's HTTPRoute should be removed on %s contract data", name)
+			"the Notebook's HTTPRoute should be removed on %s ingress data", name)
 		// Never the default Gateway, never a recreated workbench.
 		g.Consistently(func() bool {
 			return tc.notebookNeverOnDefaultGateway(ctx, notebook)
 		}, 30*time.Second, 2*time.Second).Should(BeTrue(),
-			"%s contract data must never fall back to the default Gateway", name)
+			"%s ingress data must never fall back to the default Gateway", name)
 		require.Equal(t, stsUID, tc.notebookStatefulSetUID(ctx, t, notebook),
-			"%s contract data must not recreate the workbench", name)
+			"%s ingress data must not recreate the workbench", name)
 	}
 
-	// Missing contract data: a valid projection without the assigned shard.
+	// Missing ingress data: a valid projection without the assigned shard.
 	// This is the parseable failure: the shard becomes unknown to the
 	// controller, which must surface IngressNotFound and remove the route.
-	injectFailure("missing", string(missingData))
+	// The hash is recomputed over the modified payload so this is a
+	// self-consistent projection, a legitimate writer that simply does not
+	// carry the shard, not a tamper case.
+	injectFailure("missing", string(missingData), "")
 
 	// Restore the valid projection and wait for the assignment to reconverge
 	// before the malformed phase: the missing phase above ends with the route
@@ -1175,22 +1201,30 @@ func (tc *WorkbenchesTestCtx) ValidateNotebookIngressContractDataFailures(t *tes
 	// data entirely (the route-less, no-fallback checks cannot fail twice).
 	// Each failure phase must be observed from a healthy, route-admitted
 	// state.
-	require.NoError(t, tc.setNotebookControllerConfigIngresses(ctx, validData))
+	require.NoError(t, tc.setNotebookControllerConfigIngressData(ctx, validData, ""))
 	tc.requireNotebookParent(t, notebook, alpha.Name, true)
 
-	// Malformed contract data: the projection cannot be parsed at all. The
-	// shipped controller notices (its ConfigMap watch fires and reconciles all
-	// Notebooks) but the reconcile fails on the parse without emitting
-	// IngressNotFound or removing the route - the stale route keeps serving.
-	// This case encodes the AC behavior and currently FAILS as the product
-	// finding on 94382 (routed to 94381/94380); see the qualification ledger.
-	injectFailure("malformed", `[{"name": "truncated`)
+	// Malformed ingress data: the projection cannot be parsed at all, under a
+	// hash recomputed over the malformed payload so the parse path itself is
+	// exercised rather than the checksum. The shipped controller notices (its
+	// ConfigMap watch fires and reconciles all Notebooks) but the reconcile
+	// fails on the parse without emitting IngressNotFound or removing the
+	// route - the stale route keeps serving. This case encodes the AC
+	// behavior and currently FAILS as the product finding on 94382 (routed to
+	// 94381/94380); see the qualification ledger.
+	injectFailure("malformed", `[{"name": "truncated`, "")
 
-	// Recovery: with valid contract data the assignment reconverges.
-	require.NoError(t, tc.setNotebookControllerConfigIngresses(ctx, validData))
+	// Tampered ingress data: a valid payload under a hash that does not match
+	// it. Without the checksum this case is indistinguishable from valid
+	// data; with it, the notebook controller must fail closed exactly like
+	// the parseable and malformed cases.
+	injectFailure("tampered", validData, "deadbeef")
+
+	// Recovery: with valid data the assignment reconverges.
+	require.NoError(t, tc.setNotebookControllerConfigIngressData(ctx, validData, ""))
 	tc.requireNotebookParent(t, notebook, alpha.Name, true)
 	require.Equal(t, stsUID, tc.notebookStatefulSetUID(ctx, t, notebook),
-		"contract-data recovery must not recreate the workbench")
+		"ingress-data recovery must not recreate the workbench")
 }
 
 // ValidateNotebookControllerRBACIsolation pins the notebook controller's
